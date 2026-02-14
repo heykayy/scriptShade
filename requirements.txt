@@ -1,0 +1,10 @@
+# Core ML libraries
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+sentencepiece>=0.1.97
+scikit-learn>=1.2.0
+
+# Utilities
+nltk>=3.8.0
+numpy>=1.24.0
