@@ -46,8 +46,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/flashcard-master.git
-cd flashcard-master
+git clone https://github.com/yourusername/scriptshade.git
+cd scriptshade
 
 # Install dependencies
 pip install torch transformers
