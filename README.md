@@ -33,8 +33,8 @@ AI-powered flashcard quiz app. Paste a topic, pick a provider, get a quiz. Track
 ## Project structure
 
 ```
-/                         ← frontend (Vite + React)
-  src/
+/                         
+  src/                      <-- Frontend
     flashcard-quiz-app.jsx
     main.jsx
     style.css
@@ -42,12 +42,21 @@ AI-powered flashcard quiz app. Paste a topic, pick a provider, get a quiz. Track
   vite.config.js
   package.json
 
-/server/                  ← backend (Express)
-  index.js
-  db.js
-  package.json
+  server/                   <-- Backend
+    .dockerignore
+    .env.example
+    index.js
+    db.js
+    package.json
+    Dockerfile
+
+  .dockerignore             <-- Project-level infra
   .env.example
+  .gitignore
   Dockerfile
+  docker-compose.yml
+  nginx.conf
+  README.md
 ```
 
 ---
@@ -91,7 +100,7 @@ All of these go in `server/.env` for local dev, or in Render's Environment tab f
 | `OPENAI_API_KEY` | optional | Enables OpenAI as a provider |
 | `OPENAI_MODEL` | optional | Defaults to `gpt-4o-mini` |
 | `GEMINI_API_KEY` | optional | Enables Google Gemini as a provider |
-| `GEMINI_MODEL` | optional | Defaults to `gemini-2.0-flash` |
+| `GEMINI_MODEL` | optional | Defaults to `gemini-3.1-flash-lite` |
 
 At least one provider key is needed for real generation. Demo Mode works without any.
 
