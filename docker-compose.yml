@@ -2,12 +2,9 @@ services:
   server:
     build: ./server
     env_file: ./server/.env
-    environment:
-      - DB_PATH=/app/data/data.db
-    volumes:
-      - scriptshade-data:/app/data
+    # No DB_PATH or volume needed — data lives on Turso, not the local filesystem.
+    # For local dev without Turso, the server falls back to an in-memory SQLite db.
     restart: unless-stopped
-    # No published port needed — only the frontend's nginx talks to it, over the internal compose network.
     expose:
       - "8787"
 
@@ -21,6 +18,3 @@ services:
     depends_on:
       - server
     restart: unless-stopped
-
-volumes:
-  scriptshade-data:
