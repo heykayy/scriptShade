@@ -1,0 +1,26 @@
+services:
+  server:
+    build: ./server
+    env_file: ./server/.env
+    environment:
+      - DB_PATH=/app/data/data.db
+    volumes:
+      - scriptshade-data:/app/data
+    restart: unless-stopped
+    # No published port needed — only the frontend's nginx talks to it, over the internal compose network.
+    expose:
+      - "8787"
+
+  web:
+    build:
+      context: .
+      args:
+        VITE_API_BASE: ""   # empty => same-origin /api, proxied by nginx to the `server` service
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  scriptshade-data:

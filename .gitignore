@@ -1,7 +1,16 @@
-# Byte-compiled / optimized / DLL files
+# Python bytecode and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.pyd
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+node_modules/
+*/node_modules/
 
 # Virtual environments
 venv/
@@ -9,33 +18,51 @@ env/
 .venv/
 ENV/
 
-# Jupyter Notebook checkpoints
+# Jupyter / notebooks
 .ipynb_checkpoints/
 
-# VS Code settings
-.vscode/
+# Local app data and generated sessions
+sessions/
+exports/
+output/
+*.session.json
+*.json.bak
 
-# PyCharm settings
-.idea/
+# AI / ML model artifacts
+models/
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+.cache/
+.huggingface/
+torch_cache/
+wandb/
+mlruns/
 
-# Logs and local databases
-*.log
-*.sqlite3
-*.db
+# Test and coverage output
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Environment variables
 .env
 .env.*
+!.env.example
 
-# Test coverage reports
-htmlcov/
-.coverage
-.coverage.*
+# Logs and local databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
+# IDE and editor settings
+.vscode/
+.idea/
 
 # OS-specific files
 .DS_Store
