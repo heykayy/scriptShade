@@ -8,7 +8,64 @@ import cors from "cors";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { Resend } from "resend";
 import { dbGet, dbAll, dbRun, initDb, EMPTY_STORE } from "./db.js";
+
+// ── Email (Resend) ────────────────────────────────────────────────────────────
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const EMAIL_FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
+if (!resend) console.warn("WARNING: RESEND_API_KEY not set — email verification disabled. Signups will be blocked.");
+
+async function sendOtp(to, otp, purpose) {
+  if (!resend) throw new Error("Email service not configured.");
+  const subject = purpose === "signup" ? "Verify your scriptShade account" : "Reset your scriptShade password";
+  const body = purpose === "signup"
+    ? `<p>Your verification code is:</p><h2 style="letter-spacing:0.1em;font-family:monospace">${otp}</h2><p>This code expires in 15 minutes.</p>`
+    : `<p>Your password reset code is:</p><h2 style="letter-spacing:0.1em;font-family:monospace">${otp}</h2><p>This code expires in 15 minutes. If you didn't request this, ignore this email.</p>`;
+  await resend.emails.send({ from: EMAIL_FROM, to, subject, html: body });
+}
+
+// ── Allowed email domains ────────────────────────────────────────────────────
+// Blocks disposable/fake addresses. Add more as needed.
+const ALLOWED_DOMAINS = new Set([
+  "gmail.com", "googlemail.com",
+  "yahoo.com", "yahoo.co.uk", "yahoo.co.in", "yahoo.fr", "yahoo.de", "yahoo.es",
+  "outlook.com", "hotmail.com", "hotmail.co.uk", "live.com", "msn.com",
+  "proton.me", "protonmail.com", "protonmail.ch",
+  "icloud.com", "me.com", "mac.com",
+  "aol.com",
+  "zoho.com",
+  "tutanota.com", "tuta.io",
+  "fastmail.com", "fastmail.fm",
+  "hey.com",
+  "pm.me",
+]);
+
+function isAllowedEmail(email) {
+  const domain = email.split("@")[1]?.toLowerCase();
+  return domain && ALLOWED_DOMAINS.has(domain);
+}
+
+// ── In-memory OTP store ──────────────────────────────────────────────────────
+// { email -> { otp, expires, purpose } }
+const otpStore = new Map();
+const OTP_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function generateOtp() {
+  return String(crypto.randomInt(100000, 999999)); // 6-digit
+}
+function storeOtp(email, otp, purpose) {
+  otpStore.set(email.toLowerCase(), { otp, expires: Date.now() + OTP_TTL_MS, purpose });
+}
+function verifyOtp(email, otp, purpose) {
+  const entry = otpStore.get(email.toLowerCase());
+  if (!entry) return false;
+  if (entry.purpose !== purpose) return false;
+  if (Date.now() > entry.expires) { otpStore.delete(email.toLowerCase()); return false; }
+  if (entry.otp !== otp.trim()) return false;
+  otpStore.delete(email.toLowerCase()); // burn after use
+  return true;
+}
 
 const app = express();
 
@@ -236,16 +293,37 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Step 1 — send OTP to email before creating the account
+app.post("/api/auth/signup/send-otp", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: "Enter a valid email address." });
+    const normalizedEmail = email.toLowerCase();
+    if (!isAllowedEmail(normalizedEmail)) return res.status(400).json({ error: "Please use a real email address (Gmail, Yahoo, Outlook, Proton, iCloud, etc.)." });
+    if (ADMIN_EMAIL_ENV && normalizedEmail === ADMIN_EMAIL_ENV) return res.status(403).json({ error: "This email or username is not allowed or available for use." });
+    const existing = await dbGet("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+    if (existing) return res.status(409).json({ error: "An account with that email already exists." });
+    const otp = generateOtp();
+    storeOtp(normalizedEmail, otp, "signup");
+    await sendOtp(normalizedEmail, otp, "signup");
+    res.json({ ok: true, message: "Verification code sent. Check your inbox." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not send verification email. Please try again." });
+  }
+});
+
+// Step 2 — verify OTP and create the account
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const { email, password } = req.body || {};
+    const { email, password, otp } = req.body || {};
     if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: "Enter a valid email address." });
     if (!password || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
+    if (!otp) return res.status(400).json({ error: "Verification code is required." });
 
     const normalizedEmail = email.toLowerCase();
-    if (ADMIN_EMAIL_ENV && normalizedEmail === ADMIN_EMAIL_ENV) {
-      return res.status(403).json({ error: "This email or username is not allowed or available for use." });
-    }
+    if (ADMIN_EMAIL_ENV && normalizedEmail === ADMIN_EMAIL_ENV) return res.status(403).json({ error: "This email or username is not allowed or available for use." });
+    if (!verifyOtp(normalizedEmail, otp, "signup")) return res.status(400).json({ error: "Invalid or expired verification code." });
 
     const existing = await dbGet("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
     if (existing) return res.status(409).json({ error: "An account with that email already exists." });
@@ -257,14 +335,9 @@ app.post("/api/auth/signup", async (req, res) => {
       "INSERT INTO users (email, password_hash, recovery_code_hash, created_at) VALUES (?, ?, ?, ?)",
       [normalizedEmail, hash, recoveryCodeHash, Date.now()]
     );
-    await dbRun(
-      "INSERT INTO user_store (user_id, data, updated_at) VALUES (?, ?, ?)",
-      [info.lastInsertRowid, EMPTY_STORE, Date.now()]
-    );
+    await dbRun("INSERT INTO user_store (user_id, data, updated_at) VALUES (?, ?, ?)", [info.lastInsertRowid, EMPTY_STORE, Date.now()]);
     const row = await dbGet("SELECT * FROM users WHERE id = ?", [info.lastInsertRowid]);
-    const user = { id: row.id, email: row.email, isAdmin: false }; // regular accounts never carry admin, by design
-    // recoveryCode is returned ONLY this once — the server only ever keeps its bcrypt hash.
-    res.json({ token: signToken({ ...row, is_admin: 0 }), user, recoveryCode });
+    res.json({ token: signToken({ ...row, is_admin: 0 }), user: { id: row.id, email: row.email, isAdmin: false }, recoveryCode });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Signup failed. Please try again." });
@@ -338,44 +411,62 @@ app.post("/api/auth/developer-login", (req, res) => {
   res.json({ token: signToken({ id: -1, email: ADMIN_EMAIL_ENV, is_admin: 1 }), user: masterUser });
 });
 
-// ── Forgot password ──────────────────────────────────────────────────────
-// No email server involved — this requires the one-time recovery code issued at
-// signup (or the last time this was used) instead. That's the actual security
-// boundary: anyone can type in a stranger's email, but only the account owner
-// holds the recovery code. On success, the code is rotated (old one burned,
-// a new one issued) and the user is logged straight back in.
+// ── Forgot password ──────────────────────────────────────────────────────────
+// Primary: email OTP  |  Secondary: recovery code (offline fallback)
+
+// Step 1 — send OTP to email
+app.post("/api/auth/forgot-password/send-otp", async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: "Email is required." });
+    if (loginRateLimited(req.ip)) return res.status(429).json({ error: "Too many attempts. Please wait a while and try again." });
+    const normalizedEmail = email.toLowerCase();
+    const row = await dbGet("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
+    if (row) {
+      const otp = generateOtp();
+      storeOtp(normalizedEmail, otp, "reset");
+      await sendOtp(normalizedEmail, otp, "reset").catch(err => console.error("Email send failed:", err));
+    }
+    // Always respond ok — don't reveal whether the account exists
+    res.json({ ok: true, message: "If an account exists with that email, a reset code has been sent." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not send reset email. Please try again." });
+  }
+});
+
+// Step 2 — reset with OTP (primary) or recovery code (secondary)
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
-    const { email, recoveryCode, newPassword } = req.body || {};
-    if (!email || !recoveryCode || !newPassword) return res.status(400).json({ error: "Email, recovery code, and a new password are all required." });
+    const { email, otp, recoveryCode, newPassword } = req.body || {};
+    if (!email || !newPassword) return res.status(400).json({ error: "Email and new password are required." });
     if (newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters." });
+    if (!otp && !recoveryCode) return res.status(400).json({ error: "A verification code or recovery code is required." });
+    if (loginRateLimited(req.ip)) return res.status(429).json({ error: "Too many attempts. Please wait a while and try again." });
 
-    if (loginRateLimited(req.ip)) {
-      return res.status(429).json({ error: "Too many attempts. Please wait a while and try again." });
+    const normalizedEmail = email.toLowerCase();
+    const row = await dbGet("SELECT * FROM users WHERE email = ?", [normalizedEmail]);
+
+    if (otp) {
+      // Primary: email OTP
+      if (!verifyOtp(normalizedEmail, otp, "reset")) {
+        recordFailedLogin(req.ip);
+        return res.status(400).json({ error: "Invalid or expired verification code." });
+      }
+    } else {
+      // Secondary: recovery code
+      if (!row || !row.recovery_code_hash) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Incorrect email or recovery code." }); }
+      const codeOk = await bcrypt.compare(recoveryCode.trim().toUpperCase(), row.recovery_code_hash);
+      if (!codeOk) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Incorrect email or recovery code." }); }
     }
 
-    const row = await dbGet("SELECT * FROM users WHERE email = ?", [email.toLowerCase()]);
-    if (!row || !row.recovery_code_hash) {
-      recordFailedLogin(req.ip);
-      return res.status(401).json({ error: "Incorrect email or recovery code." });
-    }
-
-    const codeOk = await bcrypt.compare(recoveryCode.trim().toUpperCase(), row.recovery_code_hash);
-    if (!codeOk) {
-      recordFailedLogin(req.ip);
-      return res.status(401).json({ error: "Incorrect email or recovery code." });
-    }
+    if (!row) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Account not found." }); }
 
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
     const newRecoveryCode = generateRecoveryCode();
     const newRecoveryCodeHash = await bcrypt.hash(newRecoveryCode, 12);
-    await dbRun(
-      "UPDATE users SET password_hash = ?, recovery_code_hash = ? WHERE id = ?",
-      [newPasswordHash, newRecoveryCodeHash, row.id]
-    );
-
-    const user = { id: row.id, email: row.email, isAdmin: false }; // regular accounts never carry admin, by design
-    res.json({ token: signToken({ ...row, is_admin: 0 }), user, recoveryCode: newRecoveryCode });
+    await dbRun("UPDATE users SET password_hash = ?, recovery_code_hash = ? WHERE id = ?", [newPasswordHash, newRecoveryCodeHash, row.id]);
+    res.json({ token: signToken({ ...row, is_admin: 0 }), user: { id: row.id, email: row.email, isAdmin: false }, recoveryCode: newRecoveryCode });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not reset password. Please try again." });

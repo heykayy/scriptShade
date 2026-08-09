@@ -1,3 +1,91 @@
-/* Minimal global styles */
-html,body,#root{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
-body{background:#0a0a0f}
+/* ── Base ────────────────────────────────────────────────────────────────── */
+html, body, #root { height: 100%; margin: 0; font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+body { background: var(--c-bg, #0f0f13); }
+
+/* ── CSS variable defaults (Night theme) ─────────────────────────────────── */
+:root {
+  --c-bg:       #0f0f13;
+  --c-surface:  #1a1a22;
+  --c-surface2: #14141b;
+  --c-border:   #2a2a38;
+  --c-border2:  #333344;
+  --c-text:     #eeeef2;
+  --c-muted:    #8888aa;
+  --c-faint:    #55556a;
+  --c-nav-bdr:  #22222e;
+  --c-accent:   #5b8ef0;
+  --c-accent2:  #c044e8;
+  --c-grad:     linear-gradient(135deg, #5b8ef0, #c044e8);
+  --c-err-bg:   #2a1015;
+  --c-err-bdr:  #ef444455;
+  --c-err-txt:  #f87171;
+  --c-ok-bg:    #0f1f14;
+  --c-ok-bdr:   #22c55e44;
+  --c-ok-txt:   #4ade80;
+}
+
+/* ── Inline style overrides via attribute selectors ──────────────────────── */
+/* Text */
+[style*="#e8e6f0"]  { color: var(--c-text)   !important; }
+[style*="#eeeef2"]  { color: var(--c-text)   !important; }
+[style*="#6b67a0"]  { color: var(--c-muted)  !important; }
+[style*="#8888aa"]  { color: var(--c-muted)  !important; }
+[style*="#4a4770"]  { color: var(--c-faint)  !important; }
+[style*="#55556a"]  { color: var(--c-faint)  !important; }
+[style*="#9b97b8"]  { color: var(--c-muted)  !important; }
+[style*="#c5c2e0"]  { color: var(--c-text)   !important; }
+[style*="#3a3850"]  { color: var(--c-faint)  !important; }
+
+/* Backgrounds — cards, inputs, surfaces */
+[style*="background: #12101c"]  { background: var(--c-surface)  !important; }
+[style*="background:#12101c"]   { background: var(--c-surface)  !important; }
+[style*="background: #0e0d1c"]  { background: var(--c-surface2) !important; }
+[style*="background:#0e0d1c"]   { background: var(--c-surface2) !important; }
+[style*="background: #0a0a0f"]  { background: var(--c-bg)       !important; }
+[style*="background:#0a0a0f"]   { background: var(--c-bg)       !important; }
+[style*="background: #1a1729"]  { background: var(--c-surface)  !important; }
+[style*="background:#1a1729"]   { background: var(--c-surface)  !important; }
+[style*="background: #1e1b2e"]  { background: var(--c-border)   !important; }
+[style*="background:#1e1b2e"]   { background: var(--c-border)   !important; }
+
+/* Borders */
+[style*="1px solid #1e1b2e"]  { border-color: var(--c-border)  !important; }
+[style*="1px solid #2e2b3d"]  { border-color: var(--c-border2) !important; }
+[style*="1px solid #1a1729"]  { border-color: var(--c-nav-bdr) !important; }
+[style*="1px solid #22222e"]  { border-color: var(--c-nav-bdr) !important; }
+[style*="1px solid #2a2a38"]  { border-color: var(--c-border)  !important; }
+
+/* Accents */
+[style*="color: #5b8ef0"]  { color: var(--c-accent)  !important; }
+[style*="color: #c044e8"]  { color: var(--c-accent2) !important; }
+[style*="color: #a78bfa"]  { color: var(--c-accent2) !important; }
+[style*="color: #7c6fe0"]  { color: var(--c-accent)  !important; }
+
+/* Gradient backgrounds on buttons */
+[style*="linear-gradient(135deg, #5b8ef0"] { background: var(--c-grad) !important; }
+[style*="linear-gradient(135deg, #7c6fe0"] { background: var(--c-grad) !important; }
+
+/* Error / success banners */
+[style*="background: #2a0f0f"], [style*="background: #2a1015"] { background: var(--c-err-bg) !important; }
+[style*="color: #f87171"], [style*="color: #ffaaaa"]           { color: var(--c-err-txt)    !important; }
+[style*="background: #0f1f0f"], [style*="background: #0f1f14"] { background: var(--c-ok-bg) !important; }
+[style*="color: #4ade80"], [style*="color: #88ffbb"]           { color: var(--c-ok-txt)     !important; }
+
+/* ── Nav buttons ─────────────────────────────────────────────────────────── */
+.nav-btn {
+  color: var(--c-muted) !important;
+  border-color: var(--c-border) !important;
+}
+.nav-btn:hover {
+  color: var(--c-text) !important;
+  background: var(--c-surface) !important;
+  border-color: var(--c-border2) !important;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--c-accent); border-radius: 2px; }
+
+/* ── Selection ───────────────────────────────────────────────────────────── */
+::selection { background: color-mix(in srgb, var(--c-accent) 30%, transparent); color: var(--c-text); }

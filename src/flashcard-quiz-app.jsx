@@ -47,10 +47,10 @@ function saveToken(token) {
 }
 
 // ── Auth API helpers ─────────────────────────────────────────────────────────
-async function apiSignup(email, password) {
+async function apiSignup(email, password, otp) {
   const res = await fetch(`${API_BASE}/api/auth/signup`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, otp }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Signup failed.");
@@ -79,10 +79,30 @@ async function apiDeveloperLogin(email, password) {
   return data; // { token, user }
 }
 
-async function apiForgotPassword(email, recoveryCode, newPassword) {
+async function apiSendSignupOtp(email) {
+  const res = await fetch(`${API_BASE}/api/auth/signup/send-otp`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Could not send verification email.");
+  return data;
+}
+
+async function apiSendResetOtp(email) {
+  const res = await fetch(`${API_BASE}/api/auth/forgot-password/send-otp`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Could not send reset email.");
+  return data;
+}
+
+async function apiForgotPassword(email, { otp, recoveryCode }, newPassword) {
   const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, recoveryCode, newPassword }),
+    body: JSON.stringify({ email, otp, recoveryCode, newPassword }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Could not reset password.");
@@ -155,6 +175,42 @@ async function generateCards({ provider, topic, difficulty, cardCount, quizType,
   return data;
 }
 
+// ── Themes ───────────────────────────────────────────────────────────────────
+const THEME_STORAGE = "flashcard_app_theme_v1";
+function loadThemePref() { try { return localStorage.getItem(THEME_STORAGE) || "night"; } catch { return "night"; } }
+function saveThemePref(t) { try { localStorage.setItem(THEME_STORAGE, t); } catch {} }
+
+const THEMES = {
+  night: {
+    label: "Night", icon: "🌙",
+    bg: "#000000", surface: "#0d0d0d", surfaceAlt: "#0a0a0a",
+    border: "#1a1a1a", borderMuted: "#222222",
+    text: "#f0f0f0", textMuted: "#555555", textFaint: "#333333",
+    nav: "rgba(0,0,0,0.96)", navBorder: "#111111",
+    accent: "#5b8ef0", accentAlt: "#c044e8",
+    gradient: "linear-gradient(135deg, #5b8ef0, #c044e8)",
+  },
+  day: {
+    label: "Day", icon: "☀️",
+    // Mid-tone slate so white logo is visible and accents pop
+    bg: "#2d104f", surface: "#262b3d", surfaceAlt: "#2a3048",
+    border: "#343a52", borderMuted: "#3e4560",
+    text: "#e8eaf6", textMuted: "#9099c0", textFaint: "#5a6080",
+    nav: "rgba(90, 51, 124, 0.51)", navBorder: "#2c3148",
+    accent: "#5b8ef0", accentAlt: "#c044e8",
+    gradient: "linear-gradient(135deg, #5b8ef0, #c044e8)",
+  },
+  system: { label: "System", icon: "⊙" },
+};
+
+function resolveTheme(name) {
+  if (name === "system") {
+    const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
+    return prefersDark ? THEMES.night : THEMES.day;
+  }
+  return THEMES[name] || THEMES.night;
+}
+
 // ── Screens ──────────────────────────────────────────────────────────────────
 const SCREENS = {
   HOME: "home",
@@ -215,6 +271,10 @@ export default function FlashcardApp() {
   const [provider, setProviderState]  = useState(loadProviderPref());
   const [demoMode, setDemoMode]       = useState(false); // "try without setup" mode
   const [showSettings, setShowSettings] = useState(false);
+  const [themeName, setThemeNameState] = useState(loadThemePref);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const theme = resolveTheme(themeName);
+  const setTheme = (t) => { setThemeNameState(t); saveThemePref(t); setShowThemeMenu(false); };
 
   // Verify any existing token on load, and pull that user's store from the backend.
   useEffect(() => {
@@ -372,14 +432,13 @@ export default function FlashcardApp() {
   const dueCount = Object.values(store.srs || {}).filter(c => c.due <= Date.now()).length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#0a0a0f", color: "#e8e6f0", fontFamily: "'Crimson Pro', 'Georgia', serif", position: "relative" }}>
+    <div style={{ minHeight: "100vh", background: theme.bg, color: theme.text, fontFamily: "'Crimson Pro', 'Georgia', serif", position: "relative" }} onClick={() => showThemeMenu && setShowThemeMenu(false)}>
       <style>{GLOBAL_CSS}</style>
 
       {/* Nav */}
-      <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: "1px solid #1a1729", position: "sticky", top: 0, background: "rgba(10,10,15,0.92)", backdropFilter: "blur(12px)", zIndex: 100 }}>
+      <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: `1px solid ${theme.navBorder}`, position: "sticky", top: 0, background: theme.nav, backdropFilter: "blur(12px)", zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={goHome}>
-          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg, #7c6fe0, #a78bfa)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>✦</div>
-          <span style={{ fontSize: 18, fontWeight: 500, letterSpacing: "-0.02em" }}>scriptShade</span>
+          <img src="/logo.png" alt="scriptShade" style={{ width: 64, height: 64, borderRadius: 4, objectFit: "contain" }} />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {hasKey && !showSettings && <>
@@ -416,6 +475,25 @@ export default function FlashcardApp() {
           {user && !demoMode && (
             <button className="nav-btn" onClick={handleLogout} style={{ color: "#f87171", borderColor: "#f8717144" }}>Log out</button>
           )}
+          {/* ── Theme picker ── */}
+          <div style={{ position: "relative" }} onClick={e => e.stopPropagation()}>
+            <button className="nav-btn" onClick={() => setShowThemeMenu(s => !s)} title="Change theme"
+              style={showThemeMenu ? { borderColor: theme.accent, color: theme.text, background: theme.surface } : { color: theme.textMuted }}>
+              {THEMES[themeName]?.icon || "🌙"} Theme
+            </button>
+            {showThemeMenu && (
+              <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 12, padding: 6, zIndex: 200, minWidth: 140, boxShadow: "0 8px 32px #00000066" }}>
+                {Object.entries(THEMES).map(([key, t]) => (
+                  <button key={key} onClick={() => setTheme(key)} className="btn"
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 14px", borderRadius: 8, textAlign: "left", fontFamily: "inherit", fontSize: 13, color: themeName === key ? theme.accent : theme.text, background: themeName === key ? `${theme.accent}22` : "transparent" }}>
+                    <span style={{ fontSize: 15 }}>{t.icon}</span>
+                    {t.label}
+                    {themeName === key && <span style={{ marginLeft: "auto", fontSize: 10, color: theme.accent }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -467,7 +545,7 @@ export default function FlashcardApp() {
               <HistoryScreen store={store} persist={persist} onResume={(s) => { setActiveSession(s); setScreen(SCREENS.QUIZ); }} showToast={showToast} />
             )}
             {screen === SCREENS.STATS && (
-              <StatsScreen store={store} />
+              <StatsScreen store={store} user={user} />
             )}
             {screen === SCREENS.REVIEW && (
               <ReviewScreen store={store} persist={persist} onBack={() => setScreen(SCREENS.HOME)} showToast={showToast} />
@@ -506,7 +584,7 @@ function RecoveryCodeReveal({ code, onContinue }) {
         <div style={{ fontSize: 32, marginBottom: 10 }}>🔑</div>
         <h1 style={{ fontSize: 26, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 8 }}>Save your recovery code</h1>
         <p style={{ color: "#6b67a0", fontSize: 14, lineHeight: 1.6 }}>
-          This is the only way to reset your password if you forget it. It's shown <strong style={{ color: "#f59e0b" }}>once, right now</strong> — the server never stores it in plain text and can't show it to you again.
+          This is a way to reset your password if you forget it. It's shown <strong style={{ color: "#f59e0b" }}>once, right now</strong> — the server never stores it in plain text and can't show it to you again.
         </p>
       </div>
 
@@ -531,34 +609,71 @@ function RecoveryCodeReveal({ code, onContinue }) {
 
 // ── Auth Screen ────────────────────────────────────────────────────────────────
 function AuthScreen({ onSuccess, onStartDemo, authError }) {
-  const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
+  // mode: "login" | "signup" | "forgot"
+  // signupStep: "email" | "otp" | "password"
+  // forgotStep: "email" | "otp" | "password" | "recovery"
+  const [mode, setMode] = useState("login");
+  const [signupStep, setSignupStep] = useState("email");
+  const [forgotStep, setForgotStep] = useState("email");
   const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState(authError || null);
+  const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [pendingReveal, setPendingReveal] = useState(null); // { code, result } — shown before onSuccess fires
+  const [pendingReveal, setPendingReveal] = useState(null);
+
+  const inp = { width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 16, boxSizing: "border-box" };
+  const lbl = { display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 };
+
+  const reset = (newMode) => { setMode(newMode); setSignupStep("email"); setForgotStep("email"); setError(null); setInfo(null); setOtp(""); setPassword(""); setConfirm(""); setNewPassword(""); setRecoveryCode(""); };
 
   const submit = async (e) => {
     e.preventDefault();
-    setError(null);
-
-    if (mode === "signup" && password !== confirm) return setError("Passwords don't match.");
-
+    setError(null); setInfo(null);
     setLoading(true);
     try {
+      if (mode === "signup") {
+        if (signupStep === "email") {
+          await apiSendSignupOtp(email.trim());
+          setInfo("Verification code sent — check your inbox.");
+          setSignupStep("otp");
+        } else if (signupStep === "otp") {
+          setSignupStep("password");
+        } else {
+          if (password !== confirm) { setError("Passwords don't match."); return; }
+          const result = await apiSignup(email.trim(), password, otp.trim());
+          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
+          onSuccess(result);
+        }
+        return;
+      }
+
       if (mode === "forgot") {
-        const result = await apiForgotPassword(email.trim(), recoveryCode.trim(), newPassword);
-        setPendingReveal({ code: result.recoveryCode, result });
+        if (forgotStep === "email") {
+          await apiSendResetOtp(email.trim());
+          setInfo("If that email exists, a reset code has been sent.");
+          setForgotStep("otp");
+        } else if (forgotStep === "otp") {
+          setForgotStep("password");
+        } else if (forgotStep === "password") {
+          const result = await apiForgotPassword(email.trim(), { otp: otp.trim() }, newPassword);
+          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
+          onSuccess(result);
+        } else {
+          // recovery code fallback
+          const result = await apiForgotPassword(email.trim(), { recoveryCode: recoveryCode.trim() }, newPassword);
+          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
+          onSuccess(result);
+        }
         return;
       }
-      const result = mode === "signup" ? await apiSignup(email.trim(), password) : await apiLogin(email.trim(), password);
-      if (mode === "signup" && result.recoveryCode) {
-        setPendingReveal({ code: result.recoveryCode, result });
-        return;
-      }
+
+      // login
+      const result = await apiLogin(email.trim(), password);
       onSuccess(result);
     } catch (err) {
       setError(err.message || "Something went wrong.");
@@ -567,78 +682,100 @@ function AuthScreen({ onSuccess, onStartDemo, authError }) {
     }
   };
 
-  // After signup or a password reset, the recovery code must be acknowledged before entering the app.
-  if (pendingReveal) {
-    return <RecoveryCodeReveal code={pendingReveal.code} onContinue={() => onSuccess(pendingReveal.result)} />;
-  }
+  if (pendingReveal) return <RecoveryCodeReveal code={pendingReveal.code} onContinue={() => onSuccess(pendingReveal.result)} />;
+
+  const title = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Welcome back";
+  const subtitle = mode === "signup"
+    ? (signupStep === "email" ? "We'll send a code to verify your email." : signupStep === "otp" ? "Enter the 6-digit code we sent." : "Choose a password for your account.")
+    : mode === "forgot"
+    ? (forgotStep === "email" ? "We'll email you a reset code." : forgotStep === "otp" ? "Enter the 6-digit code we sent." : forgotStep === "password" ? "Set your new password." : "Enter your recovery code as a fallback.")
+    : "Log in to pick up where you left off.";
 
   return (
     <div className="fade-in" style={{ maxWidth: 420, margin: "24px auto 0" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
-        <div style={{ width: 56, height: 56, background: "linear-gradient(135deg, #7c6fe0, #a78bfa)", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 20px" }}>✦</div>
-        <h1 style={{ fontSize: 32, fontWeight: 300, letterSpacing: "-0.03em", marginBottom: 8 }}>
-          {mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Welcome back"}
-        </h1>
-        <p style={{ color: "#6b67a0", fontSize: 15 }}>
-          {mode === "signup" ? "Your progress, stats, and streak sync across devices." : mode === "forgot" ? "Enter your recovery code to set a new password instantly." : "Log in to pick up where you left off."}
-        </p>
+        <img src="/title.png" alt="scriptShade" style={{ height: 128, objectFit: "contain", margin: "0 auto 20px", display: "block" }} />
+        <p style={{ color: "#6b67a0", fontSize: 15 }}>{subtitle}</p>
       </div>
 
       <form onSubmit={submit} style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: 22 }}>
-        {error && (
-          <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#f87171", fontSize: 13 }}>{error}</div>
-        )}
-        <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>EMAIL</label>
-        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com"
-          style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 16, boxSizing: "border-box" }} />
+        {error && <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#f87171", fontSize: 13 }}>{error}</div>}
+        {info && <div style={{ background: "#0f1f0f", border: "1px solid #22c55e44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#4ade80", fontSize: 13 }}>{info}</div>}
 
-        {mode === "forgot" ? (
-          <>
-            <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>RECOVERY CODE</label>
-            <input type="text" required value={recoveryCode} onChange={e => setRecoveryCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
-              style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "'JetBrains Mono',monospace", fontSize: 14, marginBottom: 16, boxSizing: "border-box" }} />
+        {/* ── LOGIN ── */}
+        {mode === "login" && <>
+          <label style={lbl}>EMAIL</label>
+          <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
+          <label style={lbl}>PASSWORD</label>
+          <input type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 6 }} />
+          <div style={{ textAlign: "right", marginBottom: 18 }}>
+            <button type="button" onClick={() => reset("forgot")} style={{ background: "none", border: "none", color: "#6b67a0", cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>Forgot password?</button>
+          </div>
+        </>}
 
-            <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>NEW PASSWORD</label>
-            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters"
-              style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 22, boxSizing: "border-box" }} />
-          </>
-        ) : (
-          <>
-            <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>PASSWORD</label>
-            <input type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters"
-              style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: mode === "signup" ? 16 : 10, boxSizing: "border-box" }} />
+        {/* ── SIGNUP ── */}
+        {mode === "signup" && <>
+          {signupStep === "email" && <>
+            <label style={lbl}>EMAIL</label>
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
+            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>Use a real email — Gmail, Yahoo, Outlook, Proton, iCloud etc.</p>
+          </>}
+          {signupStep === "otp" && <>
+            <label style={lbl}>VERIFICATION CODE</label>
+            <input type="text" required inputMode="numeric" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.2em", fontSize: 20 }} />
+            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>Sent to {email}. <button type="button" onClick={() => { setSignupStep("email"); setError(null); setInfo(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>Change email</button></p>
+          </>}
+          {signupStep === "password" && <>
+            <label style={lbl}>PASSWORD</label>
+            <input type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" style={inp} />
+            <label style={lbl}>CONFIRM PASSWORD</label>
+            <input type="password" required minLength={8} value={confirm} onChange={e => setConfirm(e.target.value)} style={{ ...inp, marginBottom: 22 }} />
+          </>}
+        </>}
 
-            {mode === "login" && (
-              <div style={{ textAlign: "right", marginBottom: 12 }}>
-                <button type="button" onClick={() => { setMode("forgot"); setError(null); }} style={{ background: "none", border: "none", color: "#6b67a0", cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>
-                  Forgot password?
-                </button>
-              </div>
-            )}
-
-            {mode === "signup" && (
-              <>
-                <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>CONFIRM PASSWORD</label>
-                <input type="password" required minLength={8} value={confirm} onChange={e => setConfirm(e.target.value)}
-                  style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 22, boxSizing: "border-box" }} />
-              </>
-            )}
-          </>
-        )}
+        {/* ── FORGOT ── */}
+        {mode === "forgot" && <>
+          {forgotStep === "email" && <>
+            <label style={lbl}>EMAIL</label>
+            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
+          </>}
+          {forgotStep === "otp" && <>
+            <label style={lbl}>RESET CODE</label>
+            <input type="text" required inputMode="numeric" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.2em", fontSize: 20 }} />
+            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>
+              Didn't get it?{" "}
+              <button type="button" onClick={() => { setForgotStep("recovery"); setError(null); setInfo(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>Use recovery code instead</button>
+            </p>
+          </>}
+          {forgotStep === "password" && <>
+            <label style={lbl}>NEW PASSWORD</label>
+            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 22 }} />
+          </>}
+          {forgotStep === "recovery" && <>
+            <label style={lbl}>RECOVERY CODE</label>
+            <input type="text" required value={recoveryCode} onChange={e => setRecoveryCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", fontSize: 14 }} />
+            <label style={lbl}>NEW PASSWORD</label>
+            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 22 }} />
+            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>
+              <button type="button" onClick={() => { setForgotStep("otp"); setError(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to email code</button>
+            </p>
+          </>}
+        </>}
 
         <button type="submit" disabled={loading} className="btn" style={{ width: "100%", background: loading ? "#1e1b2e" : "linear-gradient(135deg, #7c6fe0, #a78bfa)", color: loading ? "#6b67a0" : "#fff", padding: "13px", borderRadius: 12, fontSize: 16, fontFamily: "inherit", fontWeight: 500 }}>
-          {loading ? "Please wait…" : mode === "signup" ? "Sign up →" : mode === "forgot" ? "Reset password →" : "Log in →"}
+          {loading ? "Please wait…"
+            : mode === "login" ? "Log in →"
+            : mode === "signup" ? (signupStep === "email" ? "Send verification code →" : signupStep === "otp" ? "Continue →" : "Create account →")
+            : (forgotStep === "email" ? "Send reset code →" : forgotStep === "otp" ? "Continue →" : "Reset password →")}
         </button>
 
         <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#6b67a0" }}>
           {mode === "forgot" ? (
-            <button type="button" onClick={() => { setMode("login"); setError(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>
-              ← Back to log in
-            </button>
+            <button type="button" onClick={() => reset("login")} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>← Back to log in</button>
           ) : (
             <>
               {mode === "signup" ? "Already have an account?" : "New here?"}{" "}
-              <button type="button" onClick={() => { setMode(mode === "signup" ? "login" : "signup"); setError(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>
+              <button type="button" onClick={() => reset(mode === "signup" ? "login" : "signup")} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>
                 {mode === "signup" ? "Log in" : "Sign up"}
               </button>
             </>
@@ -651,11 +788,8 @@ function AuthScreen({ onSuccess, onStartDemo, authError }) {
           Or try Demo Mode — no account needed →
         </button>
       </div>
-
       <div style={{ textAlign: "center", marginTop: 28 }}>
-        <button onClick={goToDeveloperRoute} style={{ background: "none", border: "none", color: "#3a3850", cursor: "pointer", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, letterSpacing: "0.05em" }}>
-          {"</> developer login"}
-        </button>
+        <button onClick={goToDeveloperRoute} style={{ background: "none", border: "none", color: "#36ff04", cursor: "pointer", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, letterSpacing: "0.05em" }}>{"</> developer login"}</button>
       </div>
     </div>
   );
@@ -1581,99 +1715,137 @@ function HistoryScreen({ store, persist, onResume, showToast }) {
 }
 
 // ── Stats Screen ──────────────────────────────────────────────────────────────
-function StatsScreen({ store }) {
+function StatsScreen({ store, user }) {
   const [selectedTopic, setSelectedTopic] = useState(Object.keys(store.stats)[0] || null);
   const topics = Object.keys(store.stats);
 
-  if (topics.length === 0) {
-    return (
-      <div className="fade-in" style={{ textAlign: "center", padding: "80px 20px" }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
-        <h2 style={{ fontSize: 28, fontWeight: 300, marginBottom: 10 }}>No stats yet</h2>
-        <p style={{ color: "#6b67a0" }}>Complete a quiz to see your progress here.</p>
-      </div>
-    );
-  }
+  // XP / level / streak
+  const xp = store.xp || 0;
+  const streak = store.streak?.count || 0;
+  const totalSessions = (store.sessions || []).length;
+  const level = Math.floor(xp / 500) + 1;
+  const xpIntoLevel = xp % 500;
+  const xpPct = (xpIntoLevel / 500) * 100;
 
   const allStats = topics.map(t => ({
-    topic: t,
-    ...store.stats[t],
+    topic: t, ...store.stats[t],
     avg: store.stats[t].attempts > 0 ? Math.round(store.stats[t].totalScore / store.stats[t].attempts) : 0,
   })).sort((a, b) => b.avg - a.avg);
 
   const topicStat = selectedTopic ? store.stats[selectedTopic] : null;
 
+  const StatCard = ({ label, value, color }) => (
+    <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 14, padding: "16px 20px", flex: 1, minWidth: 100 }}>
+      <div style={{ fontSize: 26, fontWeight: 600, color }}>{value}</div>
+      <div style={{ fontSize: 11, color: "#6b67a0", marginTop: 4, fontFamily: "'JetBrains Mono',monospace" }}>{label}</div>
+    </div>
+  );
+
   return (
     <div className="fade-in">
-      <h2 style={{ fontSize: 32, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 6 }}>Progress Tracker</h2>
-      <p style={{ color: "#6b67a0", marginBottom: 28, fontSize: 15 }}>Performance across all topics</p>
+      <h2 style={{ fontSize: 32, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 4 }}>Stats</h2>
+      <p style={{ color: "#6b67a0", marginBottom: 24, fontSize: 15 }}>
+        {user ? user.email : "Your performance across all topics"}
+      </p>
 
-      {/* Overall leaderboard */}
-      <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, overflow: "hidden", marginBottom: 28 }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #1e1b2e", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.1em" }}>
-          ALL TOPICS — RANKED BY AVERAGE SCORE
+      {/* ── XP / level / streak row ── */}
+      {user && (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+            <StatCard label="TOTAL XP"  value={xp}             color="#a78bfa" />
+            <StatCard label="LEVEL"     value={level}           color="#7c6fe0" />
+            <StatCard label="STREAK"    value={`${streak} 🔥`}  color="#f59e0b" />
+            <StatCard label="SESSIONS"  value={totalSessions}   color="#22c55e" />
+          </div>
+
+          {/* XP progress bar */}
+          <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 14, padding: "16px 20px", marginBottom: 24 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, color: "#9b97b8" }}>Level {level} → Level {level + 1}</span>
+              <span style={{ fontSize: 13, color: "#6b67a0", fontFamily: "'JetBrains Mono',monospace" }}>{xpIntoLevel} / 500 XP</span>
+            </div>
+            <div style={{ background: "#1e1b2e", borderRadius: 8, height: 10, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${xpPct}%`, background: "linear-gradient(90deg, #7c6fe0, #a78bfa)", borderRadius: 8, transition: "width 0.6s" }} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {topics.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 20px" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+          <h2 style={{ fontSize: 28, fontWeight: 300, marginBottom: 10 }}>No stats yet</h2>
+          <p style={{ color: "#6b67a0" }}>Complete a quiz to see your progress here.</p>
         </div>
-        {allStats.map((s, i) => (
-          <button key={s.topic} className="btn" onClick={() => setSelectedTopic(s.topic)} style={{ width: "100%", background: selectedTopic === s.topic ? "#1a1729" : "transparent", borderBottom: "1px solid #1e1b2e", borderTop: "none", borderLeft: "none", borderRight: "none", padding: "14px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", fontFamily: "inherit" }}>
-            <div style={{ width: 24, textAlign: "center", fontSize: 14, color: i < 3 ? ["#f59e0b","#9b97b8","#c4743e"][i] : "#4a4770", fontFamily: "'JetBrains Mono',monospace" }}>
-              {i < 3 ? ["🥇","🥈","🥉"][i] : `${i+1}.`}
+      ) : (
+        <>
+          {/* ── Topic leaderboard ── */}
+          <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, overflow: "hidden", marginBottom: 24 }}>
+            <div style={{ padding: "14px 20px", borderBottom: "1px solid #1e1b2e", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.1em" }}>
+              ALL TOPICS — RANKED BY AVERAGE SCORE
             </div>
-            <div style={{ flex: 1, textAlign: "left" }}>
-              <div style={{ fontSize: 15, color: "#e8e6f0", marginBottom: 3 }}>{s.topic}</div>
-              <div style={{ fontSize: 12, color: "#6b67a0" }}>{s.attempts} attempt{s.attempts !== 1 ? "s" : ""} · Best: {s.best}%</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 20, fontWeight: 500, color: s.avg >= 75 ? "#a78bfa" : s.avg >= 50 ? "#f59e0b" : "#ef4444" }}>
-                {s.avg}%
-              </div>
-              <div style={{ fontSize: 11, color: "#4a4770" }}>avg</div>
-            </div>
-            <div style={{ width: 60 }}>
-              <div style={{ background: "#1e1b2e", borderRadius: 3, height: 6, overflow: "hidden" }}>
-                <div style={{ height: "100%", background: s.avg >= 75 ? "#7c6fe0" : s.avg >= 50 ? "#f59e0b" : "#ef4444", width: `${s.avg}%`, borderRadius: 3, transition: "width 0.8s" }} />
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
-
-      {/* Topic detail */}
-      {topicStat && selectedTopic && (
-        <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: "20px 24px" }}>
-          <h3 style={{ fontSize: 20, fontWeight: 400, marginBottom: 18 }}>{selectedTopic}</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
-            {[
-              { label: "ATTEMPTS", value: topicStat.attempts },
-              { label: "BEST", value: `${topicStat.best}%` },
-              { label: "AVERAGE", value: `${topicStat.attempts > 0 ? Math.round(topicStat.totalScore / topicStat.attempts) : 0}%` },
-            ].map(s => (
-              <div key={s.label} style={{ background: "#0e0d1c", borderRadius: 10, padding: "12px", textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 500, color: "#c5c2e0", marginBottom: 2 }}>{s.value}</div>
-                <div style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0" }}>{s.label}</div>
-              </div>
+            {allStats.map((s, i) => (
+              <button key={s.topic} className="btn" onClick={() => setSelectedTopic(s.topic)}
+                style={{ width: "100%", background: selectedTopic === s.topic ? "#1a1729" : "transparent", borderBottom: "1px solid #1e1b2e", borderTop: "none", borderLeft: "none", borderRight: "none", padding: "14px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", fontFamily: "inherit" }}>
+                <div style={{ width: 24, textAlign: "center", fontSize: 14, color: i < 3 ? ["#f59e0b","#9b97b8","#c4743e"][i] : "#4a4770", fontFamily: "'JetBrains Mono',monospace" }}>
+                  {i < 3 ? ["🥇","🥈","🥉"][i] : `${i+1}.`}
+                </div>
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div style={{ fontSize: 15, color: "#e8e6f0", marginBottom: 3 }}>{s.topic}</div>
+                  <div style={{ fontSize: 12, color: "#6b67a0" }}>{s.attempts} attempt{s.attempts !== 1 ? "s" : ""} · Best: {s.best}%</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 20, fontWeight: 500, color: s.avg >= 75 ? "#a78bfa" : s.avg >= 50 ? "#f59e0b" : "#ef4444" }}>{s.avg}%</div>
+                  <div style={{ fontSize: 11, color: "#4a4770" }}>avg</div>
+                </div>
+                <div style={{ width: 60 }}>
+                  <div style={{ background: "#1e1b2e", borderRadius: 3, height: 6, overflow: "hidden" }}>
+                    <div style={{ height: "100%", background: s.avg >= 75 ? "#7c6fe0" : s.avg >= 50 ? "#f59e0b" : "#ef4444", width: `${s.avg}%`, borderRadius: 3, transition: "width 0.8s" }} />
+                  </div>
+                </div>
+              </button>
             ))}
           </div>
-          {topicStat.history?.length > 0 && (
-            <div>
-              <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", marginBottom: 14 }}>SCORE OVER TIME</div>
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 80 }}>
-                {topicStat.history.map((h, i) => {
-                  const isLast = i === topicStat.history.length - 1;
-                  const color = h.score >= 75 ? "#7c6fe0" : h.score >= 50 ? "#f59e0b" : "#ef4444";
-                  return (
-                    <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                      <div style={{ fontSize: 10, color: "#6b67a0", fontFamily: "'JetBrains Mono',monospace" }}>{isLast ? h.score + "%" : ""}</div>
-                      <div style={{ width: "100%", background: isLast ? color : color + "88", borderRadius: "3px 3px 0 0", height: `${Math.max(h.score, 4)}%`, transition: "height 0.5s ease" }} title={`${h.score}%`} />
-                    </div>
-                  );
-                })}
+
+          {/* ── Topic detail ── */}
+          {topicStat && selectedTopic && (
+            <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: "20px 24px" }}>
+              <h3 style={{ fontSize: 20, fontWeight: 400, marginBottom: 18 }}>{selectedTopic}</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
+                {[
+                  { label: "ATTEMPTS", value: topicStat.attempts },
+                  { label: "BEST",     value: `${topicStat.best}%` },
+                  { label: "AVERAGE",  value: `${topicStat.attempts > 0 ? Math.round(topicStat.totalScore / topicStat.attempts) : 0}%` },
+                ].map(s => (
+                  <div key={s.label} style={{ background: "#0e0d1c", borderRadius: 10, padding: "12px", textAlign: "center" }}>
+                    <div style={{ fontSize: 22, fontWeight: 500, color: "#c5c2e0", marginBottom: 2 }}>{s.value}</div>
+                    <div style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0" }}>{s.label}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: "#4a4770", fontFamily: "'JetBrains Mono',monospace" }}>
-                <span>oldest</span><span>latest</span>
-              </div>
+              {topicStat.history?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", marginBottom: 14 }}>SCORE OVER TIME</div>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 80 }}>
+                    {topicStat.history.map((h, i) => {
+                      const isLast = i === topicStat.history.length - 1;
+                      const color = h.score >= 75 ? "#7c6fe0" : h.score >= 50 ? "#f59e0b" : "#ef4444";
+                      return (
+                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <div style={{ fontSize: 10, color: "#6b67a0", fontFamily: "'JetBrains Mono',monospace" }}>{isLast ? h.score + "%" : ""}</div>
+                          <div style={{ width: "100%", background: isLast ? color : color + "88", borderRadius: "3px 3px 0 0", height: `${Math.max(h.score, 4)}%`, transition: "height 0.5s ease" }} title={`${h.score}%`} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: "#4a4770", fontFamily: "'JetBrains Mono',monospace" }}>
+                    <span>oldest</span><span>latest</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );
@@ -1820,7 +1992,7 @@ function AdminScreen({ token, currentUserId, showToast }) {
           <div style={{ fontSize: 11, color: "#4ade80", letterSpacing: "0.15em", marginBottom: 4 }}>{"// INTERNAL TOOLING — NOT PART OF THE STUDENT-FACING APP"}</div>
           <h2 style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.01em", color: "#e2fbe9", margin: 0 }}>{"<> Developer Mode"}</h2>
         </div>
-        <div style={{ fontSize: 12, color: "#6b9b7a" }}>signed in as <span style={{ color: "#4ade80" }}>{currentUserId ? "developer" : ""}</span></div>
+        <div style={{ fontSize: 12, color: "#6b9b7a" }}>signed in as <span style={{ color: "#4ade80" }}>{currentUserId ? "admin" : ""}</span></div>
       </div>
 
       <div style={{ padding: "28px 32px 0" }}>
