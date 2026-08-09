@@ -149,7 +149,7 @@ Note: the Docker setup uses a local SQLite volume (`scriptshade-data`). For self
 
 ## License
 Source code is MIT licensed. 
-Creative assets (`/artifacts`) — CC BY 4.0 — free to use with credit to heykayy, scriptShade
+Creative assets (`/artifacts`) — CC BY 4.0 — free to use with appropriate credit.
 
 ---
 

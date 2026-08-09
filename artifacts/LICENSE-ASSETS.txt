@@ -6,6 +6,6 @@ Permission is hereby granted to any person obtaining these assets (logo, title i
 
 The above copyright notice and this attribution notice shall be included in all copies or substantial uses of the assets.
 
-Attribution: Credit must be given to the original creator as: heykayy, scriptShade — https://github.com/heykayy/scriptShade
+Attribution: Credit must be given to the original creator.
 
 Full license: https://creativecommons.org/licenses/by/4.0/
