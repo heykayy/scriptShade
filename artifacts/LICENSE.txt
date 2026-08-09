@@ -1,0 +1,11 @@
+CC BY 4.0 License
+
+Copyright (c) 2026 heykayy, scriptShade
+
+Permission is hereby granted to any person obtaining these assets (logo, title image, and any other visual or brand assets in this directory) to use, copy modify, merge, distribute, and build upon them for any purpose, including commercially, subject to the following condition:
+
+The above copyright notice and this attribution notice shall be included in all copies or substantial uses of the assets.
+
+Attribution: Credit must be given to the original creator as: heykayy, scriptShade — https://github.com/heykayy/scriptShade
+
+Full license: https://creativecommons.org/licenses/by/4.0/
