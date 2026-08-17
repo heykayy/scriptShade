@@ -8,52 +8,62 @@ import cors from "cors";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import { dbGet, dbAll, dbRun, initDb, EMPTY_STORE } from "./db.js";
 
-// ── Email (Resend) ────────────────────────────────────────────────────────────
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+// ── Email via Resend SMTP ─────────────────────────────────────────────────────
+// Uses Resend's SMTP gateway — works for any recipient email without a verified
+// domain, unlike Resend's REST API which restricts senders without a domain.
 const EMAIL_FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
-if (!resend) console.warn("WARNING: RESEND_API_KEY not set — email verification disabled. Signups will be blocked.");
+const smtpTransport = process.env.RESEND_API_KEY
+  ? nodemailer.createTransport({
+      host: "smtp.resend.com",
+      port: 465,
+      secure: true,
+      auth: { user: "resend", pass: process.env.RESEND_API_KEY },
+    })
+  : null;
+
+if (!smtpTransport) {
+  console.warn("WARNING: RESEND_API_KEY not set — email OTP disabled. Signups will be blocked.");
+}
 
 async function sendOtp(to, otp, purpose) {
-  if (!resend) throw new Error("Email service not configured.");
-  const subject = purpose === "signup" ? "Verify your scriptShade account" : "Reset your scriptShade password";
+  if (process.env.DEV_BYPASS_OTP === "true") {
+    console.log(`[DEV OTP] ${to} → ${otp}`);
+    return;
+  }
+  if (!smtpTransport) throw new Error("Email service not configured.");
+  const subject = purpose === "signup"
+    ? "Verify your scriptShade account"
+    : "Reset your scriptShade password";
   const body = purpose === "signup"
     ? `<p>Your verification code is:</p><h2 style="letter-spacing:0.1em;font-family:monospace">${otp}</h2><p>This code expires in 15 minutes.</p>`
     : `<p>Your password reset code is:</p><h2 style="letter-spacing:0.1em;font-family:monospace">${otp}</h2><p>This code expires in 15 minutes. If you didn't request this, ignore this email.</p>`;
-  await resend.emails.send({ from: EMAIL_FROM, to, subject, html: body });
+  await smtpTransport.sendMail({ from: EMAIL_FROM, to, subject, html: body });
 }
 
-// ── Allowed email domains ────────────────────────────────────────────────────
-// Blocks disposable/fake addresses. Add more as needed.
+// ── Allowed email domains ─────────────────────────────────────────────────────
 const ALLOWED_DOMAINS = new Set([
   "gmail.com", "googlemail.com",
   "yahoo.com", "yahoo.co.uk", "yahoo.co.in", "yahoo.fr", "yahoo.de", "yahoo.es",
   "outlook.com", "hotmail.com", "hotmail.co.uk", "live.com", "msn.com",
   "proton.me", "protonmail.com", "protonmail.ch",
   "icloud.com", "me.com", "mac.com",
-  "aol.com",
-  "zoho.com",
+  "aol.com", "zoho.com",
   "tutanota.com", "tuta.io",
   "fastmail.com", "fastmail.fm",
-  "hey.com",
-  "pm.me",
+  "hey.com", "pm.me",
 ]);
-
 function isAllowedEmail(email) {
   const domain = email.split("@")[1]?.toLowerCase();
   return domain && ALLOWED_DOMAINS.has(domain);
 }
 
-// ── In-memory OTP store ──────────────────────────────────────────────────────
-// { email -> { otp, expires, purpose } }
+// ── In-memory OTP store ───────────────────────────────────────────────────────
 const otpStore = new Map();
-const OTP_TTL_MS = 15 * 60 * 1000; // 15 minutes
-
-function generateOtp() {
-  return String(crypto.randomInt(100000, 999999)); // 6-digit
-}
+const OTP_TTL_MS = 15 * 60 * 1000;
+function generateOtp() { return String(crypto.randomInt(100000, 999999)); }
 function storeOtp(email, otp, purpose) {
   otpStore.set(email.toLowerCase(), { otp, expires: Date.now() + OTP_TTL_MS, purpose });
 }
@@ -63,7 +73,7 @@ function verifyOtp(email, otp, purpose) {
   if (entry.purpose !== purpose) return false;
   if (Date.now() > entry.expires) { otpStore.delete(email.toLowerCase()); return false; }
   if (entry.otp !== otp.trim()) return false;
-  otpStore.delete(email.toLowerCase()); // burn after use
+  otpStore.delete(email.toLowerCase());
   return true;
 }
 
@@ -293,7 +303,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// Step 1 — send OTP to email before creating the account
+// Step 1 — send OTP before account creation
 app.post("/api/auth/signup/send-otp", async (req, res) => {
   try {
     const { email } = req.body || {};
@@ -313,21 +323,18 @@ app.post("/api/auth/signup/send-otp", async (req, res) => {
   }
 });
 
-// Step 2 — verify OTP and create the account
+// Step 2 — verify OTP and create account
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { email, password, otp } = req.body || {};
     if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: "Enter a valid email address." });
     if (!password || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
     if (!otp) return res.status(400).json({ error: "Verification code is required." });
-
     const normalizedEmail = email.toLowerCase();
     if (ADMIN_EMAIL_ENV && normalizedEmail === ADMIN_EMAIL_ENV) return res.status(403).json({ error: "This email or username is not allowed or available for use." });
     if (!verifyOtp(normalizedEmail, otp, "signup")) return res.status(400).json({ error: "Invalid or expired verification code." });
-
     const existing = await dbGet("SELECT id FROM users WHERE email = ?", [normalizedEmail]);
     if (existing) return res.status(409).json({ error: "An account with that email already exists." });
-
     const hash = await bcrypt.hash(password, 12);
     const recoveryCode = generateRecoveryCode();
     const recoveryCodeHash = await bcrypt.hash(recoveryCode, 12);
@@ -412,7 +419,7 @@ app.post("/api/auth/developer-login", (req, res) => {
 });
 
 // ── Forgot password ──────────────────────────────────────────────────────────
-// Primary: email OTP  |  Secondary: recovery code (offline fallback)
+// Primary: email OTP  |  Fallback: recovery code
 
 // Step 1 — send OTP to email
 app.post("/api/auth/forgot-password/send-otp", async (req, res) => {
@@ -427,7 +434,6 @@ app.post("/api/auth/forgot-password/send-otp", async (req, res) => {
       storeOtp(normalizedEmail, otp, "reset");
       await sendOtp(normalizedEmail, otp, "reset").catch(err => console.error("Email send failed:", err));
     }
-    // Always respond ok — don't reveal whether the account exists
     res.json({ ok: true, message: "If an account exists with that email, a reset code has been sent." });
   } catch (err) {
     console.error(err);
@@ -435,7 +441,7 @@ app.post("/api/auth/forgot-password/send-otp", async (req, res) => {
   }
 });
 
-// Step 2 — reset with OTP (primary) or recovery code (secondary)
+// Step 2 — reset with OTP (primary) or recovery code (fallback)
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
     const { email, otp, recoveryCode, newPassword } = req.body || {};
@@ -443,25 +449,16 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     if (newPassword.length < 8) return res.status(400).json({ error: "New password must be at least 8 characters." });
     if (!otp && !recoveryCode) return res.status(400).json({ error: "A verification code or recovery code is required." });
     if (loginRateLimited(req.ip)) return res.status(429).json({ error: "Too many attempts. Please wait a while and try again." });
-
     const normalizedEmail = email.toLowerCase();
     const row = await dbGet("SELECT * FROM users WHERE email = ?", [normalizedEmail]);
-
     if (otp) {
-      // Primary: email OTP
-      if (!verifyOtp(normalizedEmail, otp, "reset")) {
-        recordFailedLogin(req.ip);
-        return res.status(400).json({ error: "Invalid or expired verification code." });
-      }
+      if (!verifyOtp(normalizedEmail, otp, "reset")) { recordFailedLogin(req.ip); return res.status(400).json({ error: "Invalid or expired verification code." }); }
     } else {
-      // Secondary: recovery code
       if (!row || !row.recovery_code_hash) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Incorrect email or recovery code." }); }
       const codeOk = await bcrypt.compare(recoveryCode.trim().toUpperCase(), row.recovery_code_hash);
       if (!codeOk) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Incorrect email or recovery code." }); }
     }
-
     if (!row) { recordFailedLogin(req.ip); return res.status(401).json({ error: "Account not found." }); }
-
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
     const newRecoveryCode = generateRecoveryCode();
     const newRecoveryCodeHash = await bcrypt.hash(newRecoveryCode, 12);
