@@ -1,3 +1,4 @@
+// src/flashcard-quiz-app.jsx
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
 const DIFFICULTIES = {
@@ -8,10 +9,7 @@ const DIFFICULTIES = {
 
 const CARD_COUNTS = [5, 10, 15, 20];
 const STORAGE_KEY = "flashcard_app_v3";
-const PROVIDER_STORAGE = "flashcard_app_provider_v1"; // just a preference, not a secret
-
-// All real API keys now live server-side (see /server/.env). The browser
-// never stores or sees a key — it only stores which provider the user prefers.
+const PROVIDER_STORAGE = "flashcard_app_provider_v1";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8787";
 
 function loadStorage() {
@@ -38,7 +36,6 @@ function isDeveloperRoute() {
 function goToDeveloperRoute() { window.location.pathname = "/developer"; }
 function goToRegularRoute() { window.location.pathname = "/"; }
 
-
 function loadToken() {
   try { return localStorage.getItem(TOKEN_STORAGE) || ""; } catch { return ""; }
 }
@@ -47,68 +44,6 @@ function saveToken(token) {
 }
 
 // ── Auth API helpers ─────────────────────────────────────────────────────────
-async function apiSignup(email, password, otp) {
-  const res = await fetch(`${API_BASE}/api/auth/signup`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, otp }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Signup failed.");
-  return data; // { token, user, recoveryCode } — recoveryCode is shown ONCE, never retrievable again
-}
-
-async function apiLogin(email, password) {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Login failed.");
-  return data; // { token, user }
-}
-
-// Dedicated developer login — only ever checks the server's fixed master credentials.
-// Never falls back to a regular account, and never offers/accepts signup.
-async function apiDeveloperLogin(email, password) {
-  const res = await fetch(`${API_BASE}/api/auth/developer-login`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Developer login failed.");
-  return data; // { token, user }
-}
-
-async function apiSendSignupOtp(email) {
-  const res = await fetch(`${API_BASE}/api/auth/signup/send-otp`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Could not send verification email.");
-  return data;
-}
-
-async function apiSendResetOtp(email) {
-  const res = await fetch(`${API_BASE}/api/auth/forgot-password/send-otp`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Could not send reset email.");
-  return data;
-}
-
-async function apiForgotPassword(email, { otp, recoveryCode }, newPassword) {
-  const res = await fetch(`${API_BASE}/api/auth/forgot-password`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, otp, recoveryCode, newPassword }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Could not reset password.");
-  return data; // { token, user, recoveryCode } — a freshly rotated code, shown ONCE
-}
-
 async function apiMe(token) {
   const res = await fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
   const data = await res.json();
@@ -121,6 +56,91 @@ async function apiGetStore(token) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Could not load your data.");
   return data.store;
+}
+
+async function apiPutStore(token, store) {
+  const res = await fetch(`${API_BASE}/api/store`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ store }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Could not save your data.");
+  }
+}
+
+async function apiDeleteAccount(token) {
+  const res = await fetch(`${API_BASE}/api/account`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Could not delete your account.");
+  return data;
+}
+
+// 2FA endpoints
+async function apiComplete2fa(tempToken, totpCode, backupCode) {
+  const res = await fetch(`${API_BASE}/api/auth/complete-2fa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${tempToken}` },
+    body: JSON.stringify({ totpCode, backupCode }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "2FA verification failed.");
+  return data; // { token, user }
+}
+
+async function apiTotpSetup(token) {
+  const res = await fetch(`${API_BASE}/api/auth/totp/setup`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to set up TOTP.");
+  return data; // { secret, otpauth }
+}
+
+async function apiTotpVerify(token, code) {
+  const res = await fetch(`${API_BASE}/api/auth/totp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ code }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to verify TOTP.");
+  return data;
+}
+
+async function apiTotpDisable(token) {
+  const res = await fetch(`${API_BASE}/api/auth/totp/disable`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to disable TOTP.");
+  return data;
+}
+
+async function apiGenerateBackupCodes(token) {
+  const res = await fetch(`${API_BASE}/api/auth/backup-codes/generate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to generate backup codes.");
+  return data; // { codes: [...] }
+}
+async function apiToggleTwoFactor(token, enabled) {
+  const res = await fetch(`${API_BASE}/api/auth/2fa/toggle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ enabled }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update 2FA.");
+  return data.enabled;
 }
 
 // ── Admin API helpers ─────────────────────────────────────────────────────────
@@ -142,18 +162,6 @@ async function apiAdminDeleteUser(token, id) {
   const res = await fetch(`${API_BASE}/api/admin/users/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Could not delete user.");
-}
-
-async function apiPutStore(token, store) {
-  const res = await fetch(`${API_BASE}/api/store`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ store }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || "Could not save your data.");
-  }
 }
 
 // ── Backend API helpers (generation) ────────────────────────────────────────
@@ -192,7 +200,6 @@ const THEMES = {
   },
   day: {
     label: "Day", icon: "☀️",
-    // Mid-tone slate so white logo is visible and accents pop
     bg: "#2d104f", surface: "#262b3d", surfaceAlt: "#2a3048",
     border: "#343a52", borderMuted: "#3e4560",
     text: "#e8eaf6", textMuted: "#9099c0", textFaint: "#5a6080",
@@ -221,6 +228,7 @@ const SCREENS = {
   STATS: "stats",
   REVIEW: "review",
   ADMIN: "admin",
+  SETTINGS: "settings",
 };
 
 const GLOBAL_CSS = `
@@ -252,70 +260,140 @@ const GLOBAL_CSS = `
 `;
 
 export default function FlashcardApp() {
-  const [screen, setScreen]           = useState(SCREENS.HOME);
-  const [store, setStore]             = useState(loadStorage);
-  const [quizConfig, setQuizConfig]   = useState(null);
+  const [screen, setScreen] = useState(SCREENS.HOME);
+  const [store, setStore] = useState(loadStorage);
+  const [quizConfig, setQuizConfig] = useState(null);
   const [activeSession, setActiveSession] = useState(null);
-  const [resultData, setResultData]   = useState(null);
-  const [toast, setToast]             = useState(null);
+  const [resultData, setResultData] = useState(null);
+  const [toast, setToast] = useState(null);
 
   // ── Auth ──
-  const [token, setToken]             = useState(loadToken());
-  const [user, setUser]               = useState(null);
-  const [authChecked, setAuthChecked] = useState(false); // avoids a login-screen flash while verifying an existing token
-  const [authError, setAuthError]     = useState(null);
+  const [token, setToken] = useState(loadToken());
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authError, setAuthError] = useState(null);
+  const [needs2fa, setNeeds2fa] = useState(false);
+  const [tempToken, setTempToken] = useState(null);
+  const [twoFactorMethods, setTwoFactorMethods] = useState({ hasTotp: true, hasBackup: true });
   const syncTimer = useRef(null);
 
-  const [providers, setProviders]     = useState(null); // { anthropic: {label,configured}, ... } once loaded
+  const [providers, setProviders] = useState(null);
   const [providerError, setProviderError] = useState(null);
-  const [provider, setProviderState]  = useState(loadProviderPref());
-  const [demoMode, setDemoMode]       = useState(false); // "try without setup" mode
+  const [provider, setProviderState] = useState(loadProviderPref());
+  const [demoMode, setDemoMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const storeLoadedForToken = useRef(null);
   const [themeName, setThemeNameState] = useState(loadThemePref);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const theme = resolveTheme(themeName);
   const setTheme = (t) => { setThemeNameState(t); saveThemePref(t); setShowThemeMenu(false); };
 
-  // Verify any existing token on load, and pull that user's store from the backend.
+  // ── OAuth callback detection ──────────────────────────────────────────────
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tokenParam = params.get("token");
+    const needs2faParam = params.get("needs2fa") === "true";
+    const hasTotpParam = params.get("totp") === "true";
+    const hasBackupParam = params.get("backup") === "true";
+
+    if (tokenParam) {
+      if (needs2faParam) {
+        // Store temp token and show 2FA screen
+        setTempToken(tokenParam);
+        setNeeds2fa(true);
+        setTwoFactorMethods({ hasTotp: hasTotpParam, hasBackup: hasBackupParam });
+      } else {
+        // Final token – log in directly
+        saveToken(tokenParam);
+        setToken(tokenParam);
+      }
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // ── Verify token on load ──────────────────────────────────────────────────
   useEffect(() => {
     if (!token) { setAuthChecked(true); return; }
+    storeLoadedForToken.current = null;
     apiMe(token)
       .then(u => {
         setUser(u);
-        return apiGetStore(token);
-      })
-      .then(remoteStore => {
-        setStore(remoteStore);
-        saveStorage(remoteStore); // keep a local cache for instant loads / offline resilience
+        return apiGetStore(token).then(remoteStore => {
+          setStore(remoteStore);
+          saveStorage(remoteStore);
+          storeLoadedForToken.current = token;
+        });
       })
       .catch(err => {
-        // Expired/invalid token — fall back to the logged-out state rather than looping errors.
         setAuthError(err.message);
         setToken(""); saveToken("");
       })
       .finally(() => setAuthChecked(true));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const handleAuthSuccess = ({ token: newToken, user: newUser }) => {
-    setToken(newToken); saveToken(newToken);
+  // ── 2FA completion ────────────────────────────────────────────────────────
+  const handle2faSuccess = async (finalToken, userData) => {
+    saveToken(finalToken);
+    setToken(finalToken);
+    setUser(userData);
+    setNeeds2fa(false);
+    setTempToken(null);
+    setAuthError(null);
+    const remoteStore = await apiGetStore(finalToken);
+    setStore(remoteStore);
+    saveStorage(remoteStore);
+    storeLoadedForToken.current = finalToken;
+    if (isDeveloperRoute() && userData.isAdmin) setScreen(SCREENS.ADMIN);
+  };
+
+  const handleAuthSuccess = async ({ token: newToken, user: newUser }) => {
+    setToken(newToken);
+    saveToken(newToken);
     setUser(newUser);
     setAuthError(null);
-    apiGetStore(newToken).then(remoteStore => { setStore(remoteStore); saveStorage(remoteStore); }).catch(() => {});
+    const remoteStore = await apiGetStore(newToken);
+    setStore(remoteStore);
+    saveStorage(remoteStore);
+    storeLoadedForToken.current = newToken;
     if (isDeveloperRoute() && newUser.isAdmin) setScreen(SCREENS.ADMIN);
   };
 
   const handleLogout = () => {
     setToken(""); saveToken(""); setUser(null);
-    setStore(loadStorage()); // reset to whatever's cached locally (or defaults)
+    storeLoadedForToken.current = null;
+    setStore(loadStorage());
     setScreen(SCREENS.HOME);
+    setNeeds2fa(false);
+    setTempToken(null);
     showToast("Logged out.");
   };
 
+  const handleDeleteAccount = async () => {
+    if (!window.confirm("Delete your account permanently? This removes your login, flashcards, sessions, stats, XP, and security settings from the database.")) return;
+    try {
+      await apiDeleteAccount(token);
+      setToken("");
+      saveToken("");
+      setUser(null);
+      setStore(loadStorage());
+      storeLoadedForToken.current = null;
+      setShowSettings(false);
+      setScreen(SCREENS.HOME);
+      showToast("Account deleted.");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const updateUserSecurity = (changes) => setUser(current => current ? { ...current, ...changes } : current);
+
+  // ── Fetch providers ──────────────────────────────────────────────────────
   useEffect(() => {
     fetchProviders()
       .then(p => {
         setProviders(p);
-        // If no saved preference (or it's no longer configured), auto-pick the first configured provider
         setProviderState(prev => {
           if (prev && p[prev]?.configured) return prev;
           const firstConfigured = Object.keys(p).find(id => p[id].configured);
@@ -326,9 +404,9 @@ export default function FlashcardApp() {
   }, []);
 
   const setProvider = (id) => { setProviderState(id); saveProviderPref(id); };
-  const anyProviderConfigured = providers ? Object.values(providers).some(p => p.configured) : false;
-  const hasKey = demoMode || !!provider; // "ready to generate" — either a real provider or demo mode
+  const hasKey = demoMode || !!provider;
 
+  // ── Store persistence ─────────────────────────────────────────────────────
   const persist = useCallback((updater) => {
     setStore(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -337,12 +415,11 @@ export default function FlashcardApp() {
     });
   }, []);
 
-  // Debounced sync of the store to the backend whenever it changes, for signed-in (non-demo) users.
   useEffect(() => {
-    if (!token || demoMode) return;
+    if (!token || demoMode || storeLoadedForToken.current !== token) return;
     clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      apiPutStore(token, store).catch(() => { /* best-effort — local cache still has it */ });
+      apiPutStore(token, store).catch(() => {});
     }, 800);
     return () => clearTimeout(syncTimer.current);
   }, [store, token, demoMode]);
@@ -352,14 +429,12 @@ export default function FlashcardApp() {
     setTimeout(() => setToast(null), 3200);
   }, []);
 
-  // Choose a configured provider and enter the app
   const handleChooseProvider = (id) => {
     setProvider(id);
     setDemoMode(false);
     setShowSettings(false);
   };
 
-  // Enter demo mode — no provider/key required at all
   const handleStartDemo = () => {
     setDemoMode(true);
     setShowSettings(false);
@@ -371,6 +446,7 @@ export default function FlashcardApp() {
     showToast("Exited demo mode.");
   };
 
+  // ── Quiz flow ── (unchanged) ──────────────────────────────────────────────
   const handleQuizComplete = (session) => {
     const updatedSession = { ...session, completedAt: Date.now(), status: "completed" };
     persist(prev => {
@@ -383,7 +459,6 @@ export default function FlashcardApp() {
       stats[topic].best = Math.max(stats[topic].best, session.score);
       stats[topic].history = [...(stats[topic].history || []), { score: session.score, date: Date.now(), difficulty: session.difficulty }].slice(-20);
 
-      // ── Gamification: XP + streak ──
       const correctCount = Object.values(session.answers || {}).filter(a => (a.rating !== undefined ? a.rating >= 3 : a.correct)).length;
       const xpGained = correctCount * 10 + Math.round(session.score / 10);
       const xp = (prev.xp || 0) + xpGained;
@@ -392,12 +467,11 @@ export default function FlashcardApp() {
       const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const prevStreak = prev.streak || { count: 0, lastDay: null };
       let streak;
-      if (prevStreak.lastDay === today) streak = prevStreak; // already counted today
+      if (prevStreak.lastDay === today) streak = prevStreak;
       else if (prevStreak.lastDay === yesterday) streak = { count: prevStreak.count + 1, lastDay: today };
       else streak = { count: 1, lastDay: today };
 
-      // ── Spaced repetition: update a Leitner box per card, independent of quiz UI state ──
-      const INTERVAL_DAYS = [0, 1, 2, 4, 7, 14]; // index = box (1..5)
+      const INTERVAL_DAYS = [0, 1, 2, 4, 7, 14];
       const srs = { ...prev.srs };
       (session.cards || []).forEach((card, i) => {
         const ans = (session.answers || {})[i];
@@ -431,51 +505,36 @@ export default function FlashcardApp() {
   const keyDotColor = demoMode ? "#f59e0b" : provider ? "#22c55e" : "#ef4444";
   const dueCount = Object.values(store.srs || {}).filter(c => c.due <= Date.now()).length;
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100vh", background: theme.bg, color: theme.text, fontFamily: "'Crimson Pro', 'Georgia', serif", position: "relative" }} onClick={() => showThemeMenu && setShowThemeMenu(false)}>
       <style>{GLOBAL_CSS}</style>
 
-      {/* Nav */}
       <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: `1px solid ${theme.navBorder}`, position: "sticky", top: 0, background: theme.nav, backdropFilter: "blur(12px)", zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={goHome}>
           <img src="/logo.png" alt="scriptShade" style={{ width: 64, height: 64, borderRadius: 4, objectFit: "contain" }} />
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {hasKey && !showSettings && <>
-            <button className="nav-btn" style={screen === SCREENS.HOME ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : {}} onClick={() => setScreen(SCREENS.HOME)}>Home</button>
-            {dueCount > 0 && (
-              <button className="nav-btn" style={screen === SCREENS.REVIEW ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : { borderColor: "#f59e0b44", color: "#f59e0b" }} onClick={() => setScreen(SCREENS.REVIEW)}>
-                Review ({dueCount})
-              </button>
-            )}
-            <button className="nav-btn" style={screen === SCREENS.STATS ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : {}} onClick={() => setScreen(SCREENS.STATS)}>Stats</button>
-            <button className="nav-btn" style={screen === SCREENS.HISTORY ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : {}} onClick={() => setScreen(SCREENS.HISTORY)}>Sessions</button>
-            <span className="nav-btn" style={{ cursor: "default", color: "#a78bfa" }} title="Total XP">✦ {store.xp || 0} XP</span>
-            {store.streak?.count > 0 && <span className="nav-btn" style={{ cursor: "default", color: "#f59e0b" }} title="Daily streak">🔥 {store.streak.count}</span>}
-            {user?.isAdmin && (
-              <button className="nav-btn" style={screen === SCREENS.ADMIN ? { borderColor: "#22c55e", color: "#4ade80", background: "#0d1f12", fontFamily: "'JetBrains Mono',monospace" } : { color: "#4ade80", borderColor: "#22c55e44", fontFamily: "'JetBrains Mono',monospace" }} onClick={() => setScreen(SCREENS.ADMIN)}>
-                {"</> Developer Mode"}
-              </button>
-            )}
-          </>}
+          {!needs2fa && hasKey && (
+            <>
+              <span className="nav-btn" style={{ cursor: "default", color: "#a78bfa" }} title="Total XP">✦ {store.xp || 0} XP</span>
+              {store.streak?.count > 0 && <span className="nav-btn" style={{ cursor: "default", color: "#f59e0b" }} title="Daily streak">🔥 {store.streak.count}</span>}
+            </>
+          )}
           {demoMode && (
             <button className="nav-btn" onClick={handleExitDemo} title="Exit demo mode" style={{ color: "#f59e0b", borderColor: "#f59e0b44" }}>Exit Demo</button>
           )}
-          {user && !demoMode && (
+          {user && !demoMode && !needs2fa && (
             <span className="nav-btn" style={{ cursor: "default", color: "#6b67a0" }} title={user.email}>{user.email}</span>
           )}
-          {hasKey && (
-            <button className="nav-btn" onClick={() => setShowSettings(s => !s)} style={showSettings ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : {}}>
+          {hasKey && !needs2fa && (
+            <button className="nav-btn" onClick={() => { if (!demoMode) setShowSettings(s => !s); }} style={showSettings ? { borderColor: "#7c6fe0", color: "#c5c2e0", background: "#1a1729" } : {}}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: keyDotColor, display: "inline-block", flexShrink: 0 }} />
                 {demoMode ? "Demo" : provider ? providers?.[provider]?.label || provider : "Setup"}
               </span>
             </button>
           )}
-          {user && !demoMode && (
-            <button className="nav-btn" onClick={handleLogout} style={{ color: "#f87171", borderColor: "#f8717144" }}>Log out</button>
-          )}
-          {/* ── Theme picker ── */}
           <div style={{ position: "relative" }} onClick={e => e.stopPropagation()}>
             <button className="nav-btn" onClick={() => setShowThemeMenu(s => !s)} title="Change theme"
               style={showThemeMenu ? { borderColor: theme.accent, color: theme.text, background: theme.surface } : { color: theme.textMuted }}>
@@ -494,10 +553,29 @@ export default function FlashcardApp() {
               </div>
             )}
           </div>
+          {!needs2fa && hasKey && !showSettings && <button className="nav-btn" onClick={() => setSidebarOpen(open => !open)} title={sidebarOpen ? "Hide navigation" : "Show navigation"} aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"} style={{ width: 38, height: 38, padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{"☰"}</button>}
         </div>
       </nav>
 
-      {/* Main */}
+      {!needs2fa && hasKey && !showSettings && sidebarOpen && (
+        <aside style={{ position: "fixed", right: 0, top: 93, bottom: 0, width: 220, padding: "22px 14px", background: theme.surface, borderLeft: `1px solid ${theme.border}`, zIndex: 90 }}>
+          <div style={{ color: theme.textMuted, fontFamily: "'JetBrains Mono',monospace", fontSize: 11, letterSpacing: "0.12em", padding: "0 12px 12px" }}>WORKSPACE</div>
+          {[
+            [SCREENS.HOME, "⌂", "Home"],
+            [SCREENS.REVIEW, "↻", `Review${dueCount ? ` (${dueCount})` : ""}`],
+            [SCREENS.STATS, "◒", "Stats"],
+            [SCREENS.HISTORY, "▤", "Sessions"],
+          ].map(([target, icon, label]) => (
+            <button key={target} className="btn" onClick={() => setScreen(target)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", marginBottom: 4, borderRadius: 8, textAlign: "left", color: screen === target ? theme.text : theme.textMuted, background: screen === target ? `${theme.accent}22` : "transparent", fontSize: 15 }}>
+              <span style={{ width: 20, color: screen === target ? theme.accent : theme.textMuted }}>{icon}</span>{label}
+            </button>
+          ))}
+          <div style={{ height: 1, background: theme.border, margin: "18px 8px" }} />
+          {user && !demoMode && <button className="btn" onClick={() => setShowSettings(true)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: 8, textAlign: "left", color: showSettings ? theme.text : theme.textMuted, background: showSettings ? `${theme.accent}22` : "transparent", fontSize: 15 }}><span style={{ width: 20 }}>⚙</span>Settings</button>}
+          {user && !demoMode && <button className="btn" onClick={handleLogout} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", marginTop: 4, borderRadius: 8, textAlign: "left", color: "#f87171", background: "transparent", fontSize: 15 }}><span style={{ width: 20 }}>↪</span>Log out</button>}
+        </aside>
+      )}
+
       <main style={screen === SCREENS.ADMIN && user?.isAdmin
         ? { maxWidth: 1100, margin: "0 auto", padding: "0" }
         : { maxWidth: 780, margin: "0 auto", padding: "28px 20px" }
@@ -507,6 +585,15 @@ export default function FlashcardApp() {
             <div className="spinner" style={{ margin: "0 auto 14px" }} />
             Loading…
           </div>
+        ) : needs2fa ? (
+          <TwoFactorScreen
+            tempToken={tempToken}
+            hasTotp={twoFactorMethods.hasTotp}
+            hasBackup={twoFactorMethods.hasBackup}
+            onSuccess={handle2faSuccess}
+            onCancel={() => { setNeeds2fa(false); setTempToken(null); setToken(""); saveToken(""); }}
+            showToast={showToast}
+          />
         ) : !demoMode && !token ? (
           isDeveloperRoute()
             ? <DeveloperAuthScreen onSuccess={handleAuthSuccess} authError={authError} />
@@ -519,6 +606,11 @@ export default function FlashcardApp() {
             onStartDemo={handleStartDemo}
             onClose={() => setShowSettings(false)}
             providerError={providerError}
+            token={token}
+            user={user}
+            onUserSecurityChange={updateUserSecurity}
+            showToast={showToast}
+            onDeleteAccount={handleDeleteAccount}
           />
         ) : !hasKey ? (
           <OnboardingScreen
@@ -566,220 +658,83 @@ export default function FlashcardApp() {
   );
 }
 
-// ── Recovery Code Reveal ──────────────────────────────────────────────────────
-// Shown exactly once — right after signup, and again after a successful password
-// reset (since resetting rotates the code). The server never lets this be viewed
-// again after this screen, so the copy/confirm step matters.
-function RecoveryCodeReveal({ code, onContinue }) {
-  const [copied, setCopied] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
-
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(code); setCopied(true); } catch {}
-  };
-
-  return (
-    <div className="fade-in" style={{ maxWidth: 420, margin: "24px auto 0" }}>
-      <div style={{ textAlign: "center", marginBottom: 24 }}>
-        <div style={{ fontSize: 32, marginBottom: 10 }}>🔑</div>
-        <h1 style={{ fontSize: 26, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 8 }}>Save your recovery code</h1>
-        <p style={{ color: "#6b67a0", fontSize: 14, lineHeight: 1.6 }}>
-          This is a way to reset your password if you forget it. It's shown <strong style={{ color: "#f59e0b" }}>once, right now</strong> — the server never stores it in plain text and can't show it to you again.
-        </p>
-      </div>
-
-      <div style={{ background: "#12101c", border: "1px solid #7c6fe044", borderRadius: 14, padding: "20px", textAlign: "center", marginBottom: 16 }}>
-        <div style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: 20, letterSpacing: "0.06em", color: "#c5c2e0", marginBottom: 14, wordBreak: "break-all" }}>{code}</div>
-        <button className="btn" onClick={copy} style={{ background: copied ? "#0f2a1a" : "#1e1b2e", border: `1px solid ${copied ? "#22c55e" : "#2e2b3d"}`, color: copied ? "#4ade80" : "#9b97b8", padding: "8px 20px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
-          {copied ? "Copied ✓" : "Copy code"}
-        </button>
-      </div>
-
-      <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "#9b97b8", marginBottom: 18, cursor: "pointer" }}>
-        <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} style={{ width: 16, height: 16 }} />
-        I've saved this code somewhere safe
-      </label>
-
-      <button className="btn" disabled={!confirmed} onClick={onContinue} style={{ width: "100%", background: confirmed ? "linear-gradient(135deg, #7c6fe0, #a78bfa)" : "#1e1b2e", color: confirmed ? "#fff" : "#4a4770", padding: "13px", borderRadius: 12, fontSize: 16, fontFamily: "inherit", fontWeight: 500 }}>
-        Continue →
-      </button>
-    </div>
-  );
-}
-
-// ── Auth Screen ────────────────────────────────────────────────────────────────
-function AuthScreen({ onSuccess, onStartDemo, authError }) {
-  // mode: "login" | "signup" | "forgot"
-  // signupStep: "email" | "otp" | "password"
-  // forgotStep: "email" | "otp" | "password" | "recovery"
-  const [mode, setMode] = useState("login");
-  const [signupStep, setSignupStep] = useState("email");
-  const [forgotStep, setForgotStep] = useState("email");
-  const [email, setEmail] = useState("");
-  const [otp, setOtp] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [error, setError] = useState(authError || null);
-  const [info, setInfo] = useState(null);
+// ── Two Factor Screen ────────────────────────────────────────────────────────
+function TwoFactorScreen({ tempToken, hasTotp, hasBackup, onSuccess, onCancel, showToast }) {
+  const initialMethod = hasTotp ? "totp" : "backup";
+  const [method, setMethod] = useState(initialMethod);
+  const [totpCode, setTotpCode] = useState("");
+  const [backupCode, setBackupCode] = useState("");
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [pendingReveal, setPendingReveal] = useState(null);
-
-  const inp = { width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 16, boxSizing: "border-box" };
-  const lbl = { display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 };
-
-  const reset = (newMode) => { setMode(newMode); setSignupStep("email"); setForgotStep("email"); setError(null); setInfo(null); setOtp(""); setPassword(""); setConfirm(""); setNewPassword(""); setRecoveryCode(""); };
 
   const submit = async (e) => {
     e.preventDefault();
-    setError(null); setInfo(null);
+    if (method === "totp" && !totpCode.trim() || method === "backup" && !backupCode.trim()) {
+      setError(`Enter a ${method === "totp" ? "TOTP" : "backup"} code.`);
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
-      if (mode === "signup") {
-        if (signupStep === "email") {
-          await apiSendSignupOtp(email.trim());
-          setInfo("Verification code sent — check your inbox.");
-          setSignupStep("otp");
-        } else if (signupStep === "otp") {
-          setSignupStep("password");
-        } else {
-          if (password !== confirm) { setError("Passwords don't match."); return; }
-          const result = await apiSignup(email.trim(), password, otp.trim());
-          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
-          onSuccess(result);
-        }
-        return;
-      }
-
-      if (mode === "forgot") {
-        if (forgotStep === "email") {
-          await apiSendResetOtp(email.trim());
-          setInfo("If that email exists, a reset code has been sent.");
-          setForgotStep("otp");
-        } else if (forgotStep === "otp") {
-          setForgotStep("password");
-        } else if (forgotStep === "password") {
-          const result = await apiForgotPassword(email.trim(), { otp: otp.trim() }, newPassword);
-          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
-          onSuccess(result);
-        } else {
-          // recovery code fallback
-          const result = await apiForgotPassword(email.trim(), { recoveryCode: recoveryCode.trim() }, newPassword);
-          if (result.recoveryCode) { setPendingReveal({ code: result.recoveryCode, result }); return; }
-          onSuccess(result);
-        }
-        return;
-      }
-
-      // login
-      const result = await apiLogin(email.trim(), password);
-      onSuccess(result);
+      const data = await apiComplete2fa(tempToken, method === "totp" ? totpCode.trim() : "", method === "backup" ? backupCode.trim() : "");
+      onSuccess(data.token, data.user);
     } catch (err) {
-      setError(err.message || "Something went wrong.");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (pendingReveal) return <RecoveryCodeReveal code={pendingReveal.code} onContinue={() => onSuccess(pendingReveal.result)} />;
+  return (
+    <div className="fade-in" style={{ maxWidth: 420, margin: "40px auto 0" }}>
+      <h2 style={{ fontSize: 28, fontWeight: 300, textAlign: "center", marginBottom: 16 }}>Two‑Factor Authentication</h2>
+      <p style={{ color: "#6b67a0", textAlign: "center", marginBottom: 24 }}>
+        {method === "totp" ? "Enter the code from your authenticator app." : "Enter one of your saved backup codes."}
+      </p>
+      <form onSubmit={submit} style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: 22 }}>
+        {error && <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#f87171", fontSize: 13 }}>{error}</div>}
+        <label style={{ display: "block", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em", marginBottom: 8 }}>{method === "totp" ? "TOTP CODE" : "BACKUP CODE"}</label>
+        {method === "totp" ? (
+          <input type="text" inputMode="numeric" maxLength={6} value={totpCode} onChange={e => setTotpCode(e.target.value)} placeholder="6-digit code" style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "'JetBrains Mono',monospace", fontSize: 20, letterSpacing: "0.2em", marginBottom: 22, boxSizing: "border-box" }} />
+        ) : (
+          <input type="text" value={backupCode} onChange={e => setBackupCode(e.target.value)} placeholder="e.g., A1B2C3D4E5F6" style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "11px 14px", color: "#e8e6f0", fontFamily: "'JetBrains Mono',monospace", fontSize: 14, marginBottom: 22, boxSizing: "border-box" }} />
+        )}
+        {hasTotp && hasBackup && <button type="button" className="btn" onClick={() => { setMethod(method === "totp" ? "backup" : "totp"); setError(null); }} style={{ background: "none", border: "none", color: "#a78bfa", padding: 0, marginBottom: 18, fontFamily: "inherit", cursor: "pointer" }}>{method === "totp" ? "Use a backup code instead" : "Use an authenticator code instead"}</button>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onCancel} className="btn" style={{ flex: 1, background: "#12101c", border: "1px solid #1e1b2e", color: "#9b97b8", padding: "13px", borderRadius: 12, fontSize: 16, fontFamily: "inherit" }}>Cancel</button>
+          <button type="submit" disabled={loading} className="btn" style={{ flex: 2, background: loading ? "#1e1b2e" : "linear-gradient(135deg, #7c6fe0, #a78bfa)", color: loading ? "#6b67a0" : "#fff", padding: "13px", borderRadius: 12, fontSize: 16, fontFamily: "inherit", fontWeight: 500 }}>
+            {loading ? "Verifying..." : "Verify →"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
-  const title = mode === "signup" ? "Create your account" : mode === "forgot" ? "Reset your password" : "Welcome back";
-  const subtitle = mode === "signup"
-    ? (signupStep === "email" ? "We'll send a code to verify your email." : signupStep === "otp" ? "Enter the 6-digit code we sent." : "Choose a password for your account.")
-    : mode === "forgot"
-    ? (forgotStep === "email" ? "We'll email you a reset code." : forgotStep === "otp" ? "Enter the 6-digit code we sent." : forgotStep === "password" ? "Set your new password." : "Enter your recovery code as a fallback.")
-    : "Log in to pick up where you left off.";
+// ── Auth Screen ──────────────────────────────────────────────────────────────
+function AuthScreen({ onSuccess, onStartDemo, authError }) {
+  const [error, setError] = useState(authError || null);
+
+  const handleOAuth = (provider) => {
+    window.location.href = `${API_BASE}/api/auth/${provider}`;
+  };
 
   return (
     <div className="fade-in" style={{ maxWidth: 420, margin: "24px auto 0" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <img src="/title.png" alt="scriptShade" style={{ height: 128, objectFit: "contain", margin: "0 auto 20px", display: "block" }} />
-        <p style={{ color: "#6b67a0", fontSize: 15 }}>{subtitle}</p>
+        <p style={{ color: "#6b67a0", fontSize: 15 }}>Sign in with Google or GitHub to continue.</p>
       </div>
 
-      <form onSubmit={submit} style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: 22 }}>
+      <form style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: 22 }}>
         {error && <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#f87171", fontSize: 13 }}>{error}</div>}
-        {info && <div style={{ background: "#0f1f0f", border: "1px solid #22c55e44", borderRadius: 10, padding: "10px 14px", marginBottom: 16, color: "#4ade80", fontSize: 13 }}>{info}</div>}
-
-        {/* ── LOGIN ── */}
-        {mode === "login" && <>
-          <label style={lbl}>EMAIL</label>
-          <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
-          <label style={lbl}>PASSWORD</label>
-          <input type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 6 }} />
-          <div style={{ textAlign: "right", marginBottom: 18 }}>
-            <button type="button" onClick={() => reset("forgot")} style={{ background: "none", border: "none", color: "#6b67a0", cursor: "pointer", fontFamily: "inherit", fontSize: 12, textDecoration: "underline" }}>Forgot password?</button>
-          </div>
-        </>}
-
-        {/* ── SIGNUP ── */}
-        {mode === "signup" && <>
-          {signupStep === "email" && <>
-            <label style={lbl}>EMAIL</label>
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
-            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>Use a real email — Gmail, Yahoo, Outlook, Proton, iCloud etc.</p>
-          </>}
-          {signupStep === "otp" && <>
-            <label style={lbl}>VERIFICATION CODE</label>
-            <input type="text" required inputMode="numeric" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.2em", fontSize: 20 }} />
-            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>Sent to {email}. <button type="button" onClick={() => { setSignupStep("email"); setError(null); setInfo(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>Change email</button></p>
-          </>}
-          {signupStep === "password" && <>
-            <label style={lbl}>PASSWORD</label>
-            <input type="password" required minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" style={inp} />
-            <label style={lbl}>CONFIRM PASSWORD</label>
-            <input type="password" required minLength={8} value={confirm} onChange={e => setConfirm(e.target.value)} style={{ ...inp, marginBottom: 22 }} />
-          </>}
-        </>}
-
-        {/* ── FORGOT ── */}
-        {mode === "forgot" && <>
-          {forgotStep === "email" && <>
-            <label style={lbl}>EMAIL</label>
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@gmail.com" style={inp} />
-          </>}
-          {forgotStep === "otp" && <>
-            <label style={lbl}>RESET CODE</label>
-            <input type="text" required inputMode="numeric" maxLength={6} value={otp} onChange={e => setOtp(e.target.value)} placeholder="6-digit code" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", letterSpacing: "0.2em", fontSize: 20 }} />
-            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>
-              Didn't get it?{" "}
-              <button type="button" onClick={() => { setForgotStep("recovery"); setError(null); setInfo(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>Use recovery code instead</button>
-            </p>
-          </>}
-          {forgotStep === "password" && <>
-            <label style={lbl}>NEW PASSWORD</label>
-            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 22 }} />
-          </>}
-          {forgotStep === "recovery" && <>
-            <label style={lbl}>RECOVERY CODE</label>
-            <input type="text" required value={recoveryCode} onChange={e => setRecoveryCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" style={{ ...inp, fontFamily: "'JetBrains Mono',monospace", fontSize: 14 }} />
-            <label style={lbl}>NEW PASSWORD</label>
-            <input type="password" required minLength={8} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 8 characters" style={{ ...inp, marginBottom: 22 }} />
-            <p style={{ fontSize: 12, color: "#6b67a0", marginBottom: 16, marginTop: -8 }}>
-              <button type="button" onClick={() => { setForgotStep("otp"); setError(null); }} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to email code</button>
-            </p>
-          </>}
-        </>}
-
-        <button type="submit" disabled={loading} className="btn" style={{ width: "100%", background: loading ? "#1e1b2e" : "linear-gradient(135deg, #7c6fe0, #a78bfa)", color: loading ? "#6b67a0" : "#fff", padding: "13px", borderRadius: 12, fontSize: 16, fontFamily: "inherit", fontWeight: 500 }}>
-          {loading ? "Please wait…"
-            : mode === "login" ? "Log in →"
-            : mode === "signup" ? (signupStep === "email" ? "Send verification code →" : signupStep === "otp" ? "Continue →" : "Create account →")
-            : (forgotStep === "email" ? "Send reset code →" : forgotStep === "otp" ? "Continue →" : "Reset password →")}
-        </button>
-
-        <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#6b67a0" }}>
-          {mode === "forgot" ? (
-            <button type="button" onClick={() => reset("login")} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>← Back to log in</button>
-          ) : (
-            <>
-              {mode === "signup" ? "Already have an account?" : "New here?"}{" "}
-              <button type="button" onClick={() => reset(mode === "signup" ? "login" : "signup")} style={{ background: "none", border: "none", color: "#a78bfa", cursor: "pointer", fontFamily: "inherit", fontSize: 14, textDecoration: "underline" }}>
-                {mode === "signup" ? "Log in" : "Sign up"}
-              </button>
-            </>
-          )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <button type="button" className="btn" onClick={() => handleOAuth("google")} style={{ background: "#fff", color: "#333", padding: "12px", borderRadius: 10, fontSize: 16, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ fontSize: 20 }}>G</span> Sign in with Google
+          </button>
+          <button type="button" className="btn" onClick={() => handleOAuth("github")} style={{ background: "#24292f", color: "#fff", padding: "12px", borderRadius: 10, fontSize: 16, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <span style={{ fontSize: 20 }}>🐙</span> Sign in with GitHub
+          </button>
         </div>
       </form>
 
@@ -795,13 +750,7 @@ function AuthScreen({ onSuccess, onStartDemo, authError }) {
   );
 }
 
-// ── Developer Auth Screen ────────────────────────────────────────────────────────
-// A deliberately separate entry point, reached only via /developer or /dev — not linked
-// prominently from the normal signup/login screen. Login-only, and unlike the regular
-// AuthScreen, there is no signup form here at all. It calls a dedicated backend endpoint
-// (/api/auth/developer-login) that checks ONLY the fixed ADMIN_EMAIL/ADMIN_PASSWORD from
-// the server's .env — it never looks at the users table, so a regular account's real
-// password (even a promoted admin's) does not work here. That's intentional isolation.
+// ── Developer Auth Screen ────────────────────────────────────────────────────
 function DeveloperAuthScreen({ onSuccess, authError }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -813,10 +762,16 @@ function DeveloperAuthScreen({ onSuccess, authError }) {
     setError(null);
     setLoading(true);
     try {
-      const result = await apiDeveloperLogin(email.trim(), password);
-      onSuccess(result);
+      const res = await fetch(`${API_BASE}/api/auth/developer-login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Developer login failed.");
+      onSuccess(data);
     } catch (err) {
-      setError(err.message || "Something went wrong.");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -852,6 +807,217 @@ function DeveloperAuthScreen({ onSuccess, authError }) {
           ← Back to regular sign-in
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Settings Screen ──────────────────────────────────────────────────────────
+function SettingsScreen({ providers, provider, onChooseProvider, onStartDemo, onClose, providerError, token, user, onUserSecurityChange, showToast, onDeleteAccount }) {
+  const [totpStatus, setTotpStatus] = useState(user?.totpEnabled || false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(user?.twoFactorEnabled ?? user?.totpEnabled ?? false);
+  const [hasBackupCodes, setHasBackupCodes] = useState(user?.hasBackupCodes || false);
+  const [twoFactorOpen, setTwoFactorOpen] = useState(true);
+  const [totpSecret, setTotpSecret] = useState(null);
+  const [totpQr, setTotpQr] = useState(null);
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [totpError, setTotpError] = useState(null);
+  const [backupCodes, setBackupCodes] = useState(null);
+
+  useEffect(() => {
+    setTotpStatus(!!user?.totpEnabled);
+    setTwoFactorEnabled(!!(user?.twoFactorEnabled ?? user?.totpEnabled));
+    setHasBackupCodes(!!user?.hasBackupCodes);
+  }, [user?.totpEnabled, user?.twoFactorEnabled, user?.hasBackupCodes]);
+
+  const handleToggleTwoFactor = async () => {
+    if (!twoFactorEnabled && !totpStatus && !hasBackupCodes) {
+      setTwoFactorOpen(true);
+      showToast("Set up TOTP or generate backup codes before enabling 2FA.", "error");
+      return;
+    }
+    try {
+      const enabled = await apiToggleTwoFactor(token, !twoFactorEnabled);
+      setTwoFactorEnabled(enabled);
+      if (!enabled) {
+        setTotpStatus(false);
+        setHasBackupCodes(false);
+        setTotpSecret(null);
+        setTotpQr(null);
+        setBackupCodes(null);
+      }
+      onUserSecurityChange?.({ twoFactorEnabled: enabled, totpEnabled: !!enabled && totpStatus, hasBackupCodes: !!enabled && hasBackupCodes });
+      showToast(enabled ? "Two-factor authentication enabled." : "Two-factor authentication disabled.");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const handleEnableTotp = async () => {
+    setTotpLoading(true);
+    setTotpError(null);
+    try {
+      const data = await apiTotpSetup(token);
+      setTotpSecret(data.secret);
+      setTotpQr(data.otpauth);
+    } catch (err) {
+      setTotpError(err.message);
+    } finally {
+      setTotpLoading(false);
+    }
+  };
+
+  const handleVerifyTotp = async (code) => {
+    try {
+      await apiTotpVerify(token, code);
+      setTotpStatus(true);
+      setTwoFactorEnabled(true);
+      onUserSecurityChange?.({ totpEnabled: true, twoFactorEnabled: true });
+      setTotpSecret(null);
+      setTotpQr(null);
+      showToast("TOTP enabled!");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const handleDisableTotp = async () => {
+    if (!window.confirm("Disable TOTP? You'll no longer have two-factor authentication.")) return;
+    try {
+      await apiTotpDisable(token);
+      setTotpStatus(false);
+      setBackupCodes(null);
+      const remainsEnabled = hasBackupCodes;
+      setTwoFactorEnabled(remainsEnabled);
+      onUserSecurityChange?.({ totpEnabled: false, twoFactorEnabled: remainsEnabled });
+      showToast("TOTP disabled.");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const handleGenerateBackupCodes = async () => {
+    try {
+      const data = await apiGenerateBackupCodes(token);
+      setBackupCodes(data.codes);
+      setHasBackupCodes(true);
+      setTwoFactorEnabled(true);
+      onUserSecurityChange?.({ hasBackupCodes: true, twoFactorEnabled: true });
+      window.alert("Save these backup codes somewhere secure. They are shown only once and each code can be used only once.");
+      showToast("New backup codes generated. Save them before closing this message.");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  return (
+    <div className="fade-in" style={{ maxWidth: 500, margin: "0 auto" }}>
+      <button onClick={onClose} style={{ background: "none", border: "none", color: "#6b67a0", cursor: "pointer", fontSize: 14, fontFamily: "inherit", marginBottom: 24, display: "flex", alignItems: "center", gap: 6 }}>← Back</button>
+      <h2 style={{ fontSize: 30, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 6 }}>Settings</h2>
+
+      {/* Provider settings */}
+      <div style={{ marginBottom: 32 }}>
+        <h3 style={{ fontSize: 18, fontWeight: 400, marginBottom: 12 }}>AI Provider</h3>
+        <p style={{ color: "#6b67a0", fontSize: 14, marginBottom: 12 }}>API keys live in <span className="mono">server/.env</span> — never in the browser.</p>
+        {providerError && (
+          <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 14, padding: "16px 20px", marginBottom: 20, color: "#f87171", fontSize: 14 }}>
+            Couldn't reach the backend server ({providerError}).
+          </div>
+        )}
+        {providers && (
+          <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: "22px", marginBottom: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {Object.entries(providers).map(([id, p]) => (
+                <button key={id} className="btn" disabled={!p.configured} onClick={() => onChooseProvider(id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: provider === id ? "#1a1729" : "#0e0d1c", border: `1px solid ${provider === id ? "#7c6fe0" : "#1e1b2e"}`, borderRadius: 10, padding: "12px 16px", fontFamily: "inherit", color: p.configured ? "#e8e6f0" : "#4a4770", opacity: p.configured ? 1 : 0.55, cursor: p.configured ? "pointer" : "not-allowed" }}>
+                  <span>{p.label}</span>
+                  <span style={{ fontSize: 12, color: p.configured ? "#4ade80" : "#6b67a0" }}>{provider === id ? "Active" : p.configured ? "Ready →" : "Not configured"}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <button className="btn" onClick={onStartDemo} style={{ width: "100%", background: "none", border: "1px dashed #2e2b3d", color: "#f59e0b", padding: "12px", borderRadius: 10, fontSize: 14, fontFamily: "inherit" }}>
+          Switch to Demo Mode →
+        </button>
+      </div>
+
+      {/* TOTP & Backup Codes */}
+      {user && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <h3 style={{ fontSize: 18, fontWeight: 400, margin: 0 }}>Two‑Factor Authentication</h3>
+            <button className="btn" onClick={handleToggleTwoFactor} role="switch" aria-checked={twoFactorEnabled} style={{ background: twoFactorEnabled ? "#183b2a" : "#1a1729", border: `1px solid ${twoFactorEnabled ? "#22c55e" : "#2e2b3d"}`, color: twoFactorEnabled ? "#4ade80" : "#9b97b8", padding: "6px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>{twoFactorEnabled ? "On" : "Off"}</button>
+          </div>
+          <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: "22px" }}>
+            <button className="btn" onClick={() => setTwoFactorOpen(open => !open)} style={{ background: "none", border: "none", color: "#9b97b8", padding: 0, marginBottom: twoFactorOpen ? 16 : 0, fontFamily: "inherit", cursor: "pointer" }}>{twoFactorOpen ? "Hide security methods" : "Show security methods"}</button>
+            {twoFactorOpen && <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <span>TOTP (Authenticator app)</span>
+              <div>
+                {totpStatus ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ color: "#4ade80", fontSize: 13 }}>Enabled</span>
+                    <button className="btn" onClick={handleDisableTotp} style={{ background: "#1a0f0f", border: "1px solid #3d1515", color: "#f87171", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>Disable</button>
+                  </span>
+                ) : (
+                  <button className="btn" onClick={handleEnableTotp} disabled={totpLoading} style={{ background: "#0f1a2e", border: "1px solid #7c6fe0", color: "#a78bfa", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+                    {totpLoading ? "Loading..." : "Enable"}
+                  </button>
+                )}
+              </div>
+            </div>
+            {totpError && <div style={{ color: "#f87171", fontSize: 13, marginTop: 8 }}>{totpError}</div>}
+            {totpSecret && totpQr && (
+              <div style={{ marginTop: 16, padding: "16px", background: "#0e0d1c", borderRadius: 12, border: "1px solid #1e1b2e" }}>
+                <p style={{ fontSize: 14, marginBottom: 8 }}>Scan this QR code with your authenticator app (e.g., Google Authenticator, Authy):</p>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(totpQr)}`} alt="TOTP QR code" style={{ borderRadius: 8 }} />
+                </div>
+                <p style={{ fontSize: 13, color: "#6b67a0", marginBottom: 8 }}>Or manually enter: <span className="mono" style={{ color: "#c5c2e0" }}>{totpSecret}</span></p>
+                <input type="text" placeholder="Enter the 6-digit code from your app" style={{ width: "100%", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, padding: "10px 14px", color: "#e8e6f0", fontFamily: "inherit", fontSize: 15, marginBottom: 12 }} onKeyDown={e => {
+                  if (e.key === "Enter") handleVerifyTotp(e.target.value.trim());
+                }} />
+                <button className="btn" onClick={() => {
+                  const input = document.querySelector('input[placeholder*="Enter the 6-digit"]');
+                  handleVerifyTotp(input.value.trim());
+                }} style={{ width: "100%", background: "linear-gradient(135deg, #7c6fe0, #a78bfa)", color: "#fff", padding: "10px", borderRadius: 8, fontSize: 14, fontFamily: "inherit" }}>Verify</button>
+              </div>
+            )}
+
+            {/* Backup codes */}
+            <div style={{ marginTop: 20, borderTop: "1px solid #1e1b2e", paddingTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span>Backup codes</span>
+                <button className="btn" onClick={handleGenerateBackupCodes} style={{ background: "#1e1b2e", border: "1px solid #7c6fe0", color: "#a78bfa", padding: "6px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+                  Generate new
+                </button>
+              </div>
+              {!totpStatus && <div style={{ color: "#6b67a0", fontSize: 13, marginTop: 6 }}>Backup codes can be used independently of an authenticator app.</div>}
+              {backupCodes && (
+                <div style={{ marginTop: 12, background: "#0a0a0f", borderRadius: 8, padding: "12px" }}>
+                  <p style={{ color: "#f59e0b", fontSize: 13, marginBottom: 8 }}>Save these codes! They are shown only once.</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                    {backupCodes.map((code, i) => (
+                      <div key={i} className="mono" style={{ color: "#c5c2e0", fontSize: 13, padding: "4px 8px", background: "#12101c", borderRadius: 4, textAlign: "center" }}>{code}</div>
+                    ))}
+                  </div>
+                  <button className="btn" onClick={() => { setBackupCodes(null); showToast("Backup codes hidden."); }} style={{ width: "100%", marginTop: 12, background: "#183b2a", border: "1px solid #22c55e", color: "#4ade80", padding: "9px 12px", borderRadius: 8, fontSize: 13, fontFamily: "inherit" }}>
+                    Save codes
+                  </button>
+                </div>
+              )}
+            </div>
+            </>}
+          </div>
+        </div>
+      )}
+
+      {user && (
+        <div style={{ marginTop: 32, paddingTop: 24, borderTop: "1px solid #2e1a24" }}>
+          <h3 style={{ fontSize: 18, fontWeight: 400, color: "#f87171", marginBottom: 8 }}>Danger zone</h3>
+          <p style={{ color: "#8f6673", fontSize: 14, lineHeight: 1.5, marginBottom: 14 }}>Permanently remove your account and all flashcards, sessions, stats, XP, and security settings from the database.</p>
+          <button className="btn" onClick={onDeleteAccount} style={{ background: "#2a0f14", border: "1px solid #7f2638", color: "#fca5a5", padding: "10px 14px", borderRadius: 8, fontSize: 14, fontFamily: "inherit" }}>Delete account permanently</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -912,46 +1078,6 @@ function OnboardingScreen({ providers, providerError, onChooseProvider, onStartD
           Try Demo Mode (no key needed) →
         </button>
         <div style={{ marginTop: 10, fontSize: 13, color: "#4a4770" }}>Generates a few sample flashcards so you can try the app instantly.</div>
-      </div>
-    </div>
-  );
-}
-
-// ── Settings Screen ───────────────────────────────────────────────────────────
-// Lets the user switch which server-configured provider they're using, or hop into Demo Mode.
-function SettingsScreen({ providers, provider, onChooseProvider, onStartDemo, onClose, providerError }) {
-  return (
-    <div className="fade-in" style={{ maxWidth: 500, margin: "0 auto" }}>
-      <button onClick={onClose} style={{ background: "none", border: "none", color: "#6b67a0", cursor: "pointer", fontSize: 14, fontFamily: "inherit", marginBottom: 24, display: "flex", alignItems: "center", gap: 6 }}>← Back</button>
-      <h2 style={{ fontSize: 30, fontWeight: 300, letterSpacing: "-0.02em", marginBottom: 6 }}>Provider Settings</h2>
-      <p style={{ color: "#6b67a0", fontSize: 15, marginBottom: 24 }}>API keys live in <span className="mono">server/.env</span> — never in the browser.</p>
-
-      {providerError && (
-        <div style={{ background: "#2a0f0f", border: "1px solid #ef444444", borderRadius: 14, padding: "16px 20px", marginBottom: 20, color: "#f87171", fontSize: 14 }}>
-          Couldn't reach the backend server ({providerError}).
-        </div>
-      )}
-
-      {providers && (
-        <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 16, padding: "22px", marginBottom: 16 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {Object.entries(providers).map(([id, p]) => (
-              <button key={id} className="btn" disabled={!p.configured} onClick={() => onChooseProvider(id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: provider === id ? "#1a1729" : "#0e0d1c", border: `1px solid ${provider === id ? "#7c6fe0" : "#1e1b2e"}`, borderRadius: 10, padding: "12px 16px", fontFamily: "inherit", color: p.configured ? "#e8e6f0" : "#4a4770", opacity: p.configured ? 1 : 0.55, cursor: p.configured ? "pointer" : "not-allowed" }}>
-                <span>{p.label}</span>
-                <span style={{ fontSize: 12, color: p.configured ? "#4ade80" : "#6b67a0" }}>{provider === id ? "Active" : p.configured ? "Ready →" : "Not configured"}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <button className="btn" onClick={onStartDemo} style={{ width: "100%", background: "none", border: "1px dashed #2e2b3d", color: "#f59e0b", padding: "12px", borderRadius: 10, fontSize: 14, fontFamily: "inherit" }}>
-        Switch to Demo Mode →
-      </button>
-
-      <div style={{ marginTop: 20, padding: "12px 16px", background: "#0e0d1c", border: "1px solid #1e1b2e", borderRadius: 10, fontSize: 13, color: "#4a4770", lineHeight: 1.6 }}>
-        <div style={{ marginBottom: 6, color: "#6b67a0", fontFamily: "'JetBrains Mono',monospace", fontSize: 11, letterSpacing: "0.08em" }}>SECURITY MODEL</div>
-        Every provider key is stored only in the backend's <span className="mono">.env</span> file and used server-side. The browser never receives, stores, or transmits a real API key.
       </div>
     </div>
   );
@@ -1733,6 +1859,22 @@ function StatsScreen({ store, user }) {
   })).sort((a, b) => b.avg - a.avg);
 
   const topicStat = selectedTopic ? store.stats[selectedTopic] : null;
+  const scoreTimeline = (topicStat?.history || [])
+    .map((entry, index) => ({
+      id: `${selectedTopic}-${entry.date || index}`,
+      score: Math.max(0, Math.min(100, Number(entry.score))),
+      completedAt: Number(entry.date),
+    }))
+    .filter(entry => Number.isFinite(entry.score) && Number.isFinite(entry.completedAt))
+    .sort((a, b) => a.completedAt - b.completedAt)
+    .slice(-20);
+  const timelineScores = scoreTimeline.map(entry => entry.score);
+  const timelinePoints = scoreTimeline.map((session, index) => {
+    const x = scoreTimeline.length === 1 ? 50 : (index / (scoreTimeline.length - 1)) * 100;
+    const y = 92 - (session.score / 100) * 82;
+    return { session, x, y };
+  });
+  const timelinePath = timelinePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
 
   const StatCard = ({ label, value, color }) => (
     <div style={{ background: "#12101c", border: "1px solid #1e1b2e", borderRadius: 14, padding: "16px 20px", flex: 1, minWidth: 100 }}>
@@ -1823,24 +1965,27 @@ function StatsScreen({ store, user }) {
                   </div>
                 ))}
               </div>
-              {topicStat.history?.length > 0 && (
+              {scoreTimeline.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", marginBottom: 14 }}>SCORE OVER TIME</div>
-                  <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 80 }}>
-                    {topicStat.history.map((h, i) => {
-                      const isLast = i === topicStat.history.length - 1;
-                      const color = h.score >= 75 ? "#7c6fe0" : h.score >= 50 ? "#f59e0b" : "#ef4444";
-                      return (
-                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                          <div style={{ fontSize: 10, color: "#6b67a0", fontFamily: "'JetBrains Mono',monospace" }}>{isLast ? h.score + "%" : ""}</div>
-                          <div style={{ width: "100%", background: isLast ? color : color + "88", borderRadius: "3px 3px 0 0", height: `${Math.max(h.score, 4)}%`, transition: "height 0.5s ease" }} title={`${h.score}%`} />
-                        </div>
-                      );
-                    })}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontFamily: "'JetBrains Mono',monospace", color: "#6b67a0", letterSpacing: "0.08em" }}>SCORE OVER TIME</div>
+                    <div style={{ fontSize: 12, color: "#9b97b8" }}>Latest: <strong style={{ color: "#a78bfa" }}>{timelineScores[timelineScores.length - 1]}%</strong></div>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11, color: "#4a4770", fontFamily: "'JetBrains Mono',monospace" }}>
-                    <span>oldest</span><span>latest</span>
+                  <div style={{ position: "relative", height: 190, padding: "8px 0 28px 30px" }}>
+                    <div style={{ position: "absolute", inset: "8px 0 28px 30px", background: "repeating-linear-gradient(to bottom, #1e1b2e 0, #1e1b2e 1px, transparent 1px, transparent 25%)" }} />
+                    <div style={{ position: "absolute", left: 0, top: 4, bottom: 30, display: "flex", flexDirection: "column", justifyContent: "space-between", color: "#6b67a0", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }}>
+                      <span>100%</span><span>50%</span><span>0%</span>
+                    </div>
+                    <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ position: "absolute", left: 30, right: 0, top: 8, width: "calc(100% - 30px)", height: "calc(100% - 38px)", overflow: "visible" }} aria-label="Quiz score over time">
+                      <path d={timelinePath} fill="none" stroke="#7c6fe0" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+                      {timelinePoints.map(({ session, x, y }, index) => <circle key={`${session.id || index}-${session.completedAt}`} cx={x} cy={y} r="2.8" fill="#f0c674" stroke="#12101c" strokeWidth="1" vectorEffect="non-scaling-stroke"><title>{`${session.score}% · ${new Date(session.completedAt || session.createdAt).toLocaleDateString()}`}</title></circle>)}
+                    </svg>
+                    <div style={{ position: "absolute", left: 30, right: 0, bottom: 0, display: "flex", justifyContent: "space-between", color: "#6b67a0", fontSize: 10, fontFamily: "'JetBrains Mono',monospace" }}>
+                      <span>{new Date(scoreTimeline[0].completedAt || scoreTimeline[0].createdAt).toLocaleDateString()}</span>
+                      <span>{new Date(scoreTimeline[scoreTimeline.length - 1].completedAt || scoreTimeline[scoreTimeline.length - 1].createdAt).toLocaleDateString()}</span>
+                    </div>
                   </div>
+                  <div style={{ color: "#6b67a0", fontSize: 12, marginTop: 2 }}>Each point is one completed quiz, ordered by completion date. Showing the latest {scoreTimeline.length}.</div>
                 </div>
               )}
             </div>

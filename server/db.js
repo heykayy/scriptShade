@@ -1,5 +1,5 @@
 // server/db.js
-// Turso (libSQL) — a hosted, SQLite-compatible database with a real free tier.
+// Turso (libSQL) — hosted, SQLite-compatible database with a real free tier.
 // Unlike a local data.db file on Render's free web service (which has no
 // attached disk and is wiped on every redeploy/restart), this data lives on
 // Turso's own storage and survives redeploys, restarts, and free-tier sleep
@@ -54,10 +54,15 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      recovery_code_hash TEXT,
-      is_admin INTEGER NOT NULL DEFAULT 0, -- vestigial: kept for schema stability, no longer read anywhere for auth
-      created_at INTEGER NOT NULL
+      password_hash TEXT,
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      google_id TEXT UNIQUE,
+      github_id TEXT UNIQUE,
+      totp_secret TEXT,
+      totp_enabled INTEGER NOT NULL DEFAULT 0,
+      two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+      backup_codes_hash TEXT   -- JSON array of bcrypt hashes of backup codes
     )
   `);
 
@@ -74,9 +79,28 @@ export async function initDb() {
   if (!cols.some(c => c.name === "is_admin")) {
     await client.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
   }
-  if (!cols.some(c => c.name === "recovery_code_hash")) {
-    await client.execute("ALTER TABLE users ADD COLUMN recovery_code_hash TEXT");
+  if (!cols.some(c => c.name === "google_id")) {
+    await client.execute("ALTER TABLE users ADD COLUMN google_id TEXT");
   }
+  if (!cols.some(c => c.name === "github_id")) {
+    await client.execute("ALTER TABLE users ADD COLUMN github_id TEXT");
+  }
+  if (!cols.some(c => c.name === "totp_secret")) {
+    await client.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT");
+  }
+  if (!cols.some(c => c.name === "totp_enabled")) {
+    await client.execute("ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.some(c => c.name === "two_factor_enabled")) {
+    await client.execute("ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!cols.some(c => c.name === "backup_codes_hash")) {
+    await client.execute("ALTER TABLE users ADD COLUMN backup_codes_hash TEXT");
+  }
+  if (cols.some(c => c.name === "recovery_code_hash")) {
+    await client.execute("ALTER TABLE users DROP COLUMN recovery_code_hash");
+  }
+  await client.execute("UPDATE users SET two_factor_enabled = 1 WHERE totp_enabled = 1 AND two_factor_enabled = 0");
 }
 
 export const EMPTY_STORE = JSON.stringify({

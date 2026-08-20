@@ -2,6 +2,11 @@ services:
   server:
     build: ./server
     env_file: ./server/.env
+    environment:
+      # OAuth must return through the published nginx port. The backend
+      # port is intentionally internal to the Docker network.
+      OAUTH_REDIRECT_BASE: ${OAUTH_REDIRECT_BASE:-http://localhost:8080}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
     # No DB_PATH or volume needed — data lives on Turso, not the local filesystem.
     # For local dev without Turso, the server falls back to an in-memory SQLite db.
     restart: unless-stopped
